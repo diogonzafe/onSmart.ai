@@ -305,6 +305,18 @@ def initialize_models_from_config():
                 },
                 default=False
             )
+            # Registrar modelo deepseek via HTTP
+            llm_router.register_model(
+                "deepseek-http",
+                {
+                    "type": "http",
+                    "model_name": "deepseek-http",
+                    "target_model": "deepseek",
+                    "server_url": settings.LLM_SERVER_URL,
+                    "timeout": settings.LLM_SERVER_TIMEOUT
+                },
+                default=False
+            )
             
             logger.info(f"Modelos HTTP registrados apontando para {settings.LLM_SERVER_URL}")
         
