@@ -1,0 +1,31 @@
+import httpx
+import asyncio
+from app.config import LLM_SERVER_URL, LLM_SERVER_TIMEOUT
+
+async def test_llm_integration():
+    async with httpx.AsyncClient(timeout=LLM_SERVER_TIMEOUT) as client:
+        try:
+            # Teste de saúde
+            health = await client.get(f"{LLM_SERVER_URL}/health")
+            print(f"Status de saúde: {health.json()}")
+            
+            # Teste de geração de texto
+            response = await client.post(
+                f"{LLM_SERVER_URL}/generate",
+                json={
+                    "prompt": "O que é um sistema ERP inteligente?",
+                    "model_id": "llama",
+                    "max_tokens": 100
+                }
+            )
+            result = response.json()
+            print(f"Resposta do LLM: {result['text']}")
+            
+            return True
+        except Exception as e:
+            print(f"Erro na integração com LLM: {str(e)}")
+            return False
+
+# Executar o teste
+if __name__ == "__main__":
+    asyncio.run(test_llm_integration())
