@@ -4,7 +4,7 @@ from app.schemas.user import (
     Token, TokenData, LoginRequest, RegisterRequest,
     RefreshTokenRequest, ChangePassword
 )
-from app.schemas.agent import AgentBase, AgentCreate, AgentUpdate, Agent, AgentWithTools
+#from app.schemas.agent import Agen, AgentCreate, AgentUpdate, Agent, AgentWithTools
 from app.schemas.template import TemplateBase, TemplateCreate, TemplateUpdate, Template
 from app.schemas.conversation import (
     ConversationBase, ConversationCreate, ConversationUpdate, 

@@ -5,6 +5,7 @@ from app.api import auth, users
 from app.db.database import engine, Base
 from sqlalchemy import text, inspect
 from app.api import llm_api
+from app.llm import initialize_models_from_config  # Importa a função de inicialização
 
 # Criar todas as tabelas primeiro
 Base.metadata.create_all(bind=engine)
@@ -27,6 +28,9 @@ with engine.connect() as connection:
     else:
         print("Tabela message_embeddings ainda não existe. O índice será criado na próxima execução.")
 
+# Inicializar modelos LLM
+initialize_models_from_config()  # Inicializa os modelos LLM
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="API para sistema multi-agentes de IA utilizando Model Context Protocol",
@@ -46,6 +50,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(llm_api.router)  # Incluir o router LLM API
 
 # Comentado até que os módulos sejam criados
 # app.include_router(agents.router)
