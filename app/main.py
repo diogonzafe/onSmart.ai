@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api import auth, users
 from app.db.database import engine, Base
+from app.api import mcp_api, agents_api
 from sqlalchemy import text, inspect
 from app.api import llm_api
 from app.llm import initialize_models_from_config  # Importa a função de inicialização
@@ -50,7 +51,9 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(users.router)
-app.include_router(llm_api.router)  # Incluir o router LLM API
+app.include_router(llm_api.router) 
+app.include_router(mcp_api.router)
+app.include_router(agents_api.router) # Incluir o router LLM API
 
 # Comentado até que os módulos sejam criados
 # app.include_router(agents.router)
