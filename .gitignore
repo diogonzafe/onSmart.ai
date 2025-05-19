@@ -1,0 +1,30 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Backup files
+*.bak
+*~
+*.swp
+
+# Credentials
+credentials.txt
+*credentials*
+*secret*
+*key*
+
+# Cache directories
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE settings
+.vscode/
+.idea/
