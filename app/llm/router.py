@@ -9,6 +9,7 @@ from app.llm.base import LLMBase
 from app.llm.llama import LlamaLLM
 from app.llm.mistral import MistralLLM
 from app.llm.deepseek import DeepSeekLLM
+from app.llm.http_client import HttpLLM  # Nova importação
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,8 @@ class LLMRouter:
         self.model_registry: Dict[str, Type[LLMBase]] = {
             "llama": LlamaLLM,
             "mistral": MistralLLM,
-            "deepseek": DeepSeekLLM
+            "deepseek": DeepSeekLLM,
+            "http": HttpLLM  # Novo tipo adicionado
         }
     
     def register_model(self, model_id: str, model_config: Dict[str, Any], default: bool = False) -> None:
@@ -275,6 +277,36 @@ def initialize_models_from_config():
                 },
                 default=not llm_router.default_model  # Define como padrão se não houver outro
             )
+        
+        # Configurações para servidor LLM HTTP
+        if hasattr(settings, "LLM_SERVER_URL") and settings.LLM_SERVER_URL:
+            # Registrar modelos HTTP
+            llm_router.register_model(
+                "llama-http",
+                {
+                    "type": "http",
+                    "model_name": "llama-http",
+                    "target_model": "llama",
+                    "server_url": settings.LLM_SERVER_URL,
+                    "timeout": settings.LLM_SERVER_TIMEOUT
+                },
+                default=not llm_router.default_model  # Define como padrão se não houver outro
+            )
+            
+            # Registrar modelo mistral via HTTP
+            llm_router.register_model(
+                "mistral-http",
+                {
+                    "type": "http",
+                    "model_name": "mistral-http",
+                    "target_model": "mistral",
+                    "server_url": settings.LLM_SERVER_URL,
+                    "timeout": settings.LLM_SERVER_TIMEOUT
+                },
+                default=False
+            )
+            
+            logger.info(f"Modelos HTTP registrados apontando para {settings.LLM_SERVER_URL}")
         
         if not llm_router.models:
             logger.warning("Nenhum modelo LLM foi configurado. Os serviços de LLM não estarão disponíveis.")

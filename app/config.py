@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     DB_NAME: str = "onsmart"
     
     # Google OAuth
-    GOOGLE_CLIENT_ID: str = "not-configured"
-    GOOGLE_CLIENT_SECRET: str = "not-configured"
+    GOOGLE_CLIENT_ID: str = "555634611246-qtte6m0p42ugvuq6k14vvb75jp3fqel2.apps.googleusercontent.com"
+    GOOGLE_CLIENT_SECRET: str = "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"
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
     
     # CORS

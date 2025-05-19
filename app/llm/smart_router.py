@@ -85,69 +85,90 @@ class ModelSelector:
         # Inicializar características específicas de modelos conhecidos
         self._initialize_model_characteristics()
     
-    def _initialize_model_characteristics(self) -> None:
-        """
-        Inicializa características para modelos comuns.
-        Estas são estimativas iniciais que serão refinadas com dados reais.
-        """
-        # LLaMA (local)
-        llama_characteristics = {
-            "creativity": 6,
-            "factual_accuracy": 6,
-            "code_quality": 7,
-            "reasoning": 6,
-            "computation": 5,
-            "conciseness": 5,
-            "language_quality": 6,
-            "cost_efficiency": 10,  # Custo zero sendo local
-            "speed": 4,  # Mais lento em hardware modesto
-            "context_length": 7
-        }
+    # app/llm/smart_router.py
+
+# Dentro da classe ModelSelector, método _initialize_model_characteristics
+def _initialize_model_characteristics(self) -> None:
+    """
+    Inicializa características para modelos comuns.
+    Estas são estimativas iniciais que serão refinadas com dados reais.
+    """
+    # LLaMA (local)
+    llama_characteristics = {
+        "creativity": 6,
+        "factual_accuracy": 6,
+        "code_quality": 7,
+        "reasoning": 6,
+        "computation": 5,
+        "conciseness": 5,
+        "language_quality": 6,
+        "cost_efficiency": 10,  # Custo zero sendo local
+        "speed": 4,  # Mais lento em hardware modesto
+        "context_length": 7
+    }
+    
+    # Mistral
+    mistral_characteristics = {
+        "creativity": 7,
+        "factual_accuracy": 7,
+        "code_quality": 8,
+        "reasoning": 7,
+        "computation": 6,
+        "conciseness": 6,
+        "language_quality": 7,
+        "cost_efficiency": 5,
+        "speed": 8,
+        "context_length": 6
+    }
+    
+    # DeepSeek
+    deepseek_characteristics = {
+        "creativity": 6,
+        "factual_accuracy": 7,
+        "code_quality": 9,  # Muito bom em código
+        "reasoning": 7,
+        "computation": 7,
+        "conciseness": 7,
+        "language_quality": 6,
+        "cost_efficiency": 6,
+        "speed": 7,
+        "context_length": 6
+    }
+
+    # HTTP models (servers) - Adicione essas características
+    http_characteristics = {
+        "creativity": 7,
+        "factual_accuracy": 7,
+        "code_quality": 8,
+        "reasoning": 7,
+        "computation": 6,
+        "conciseness": 6,
+        "language_quality": 7,
+        "cost_efficiency": 8,  # Considerado eficiente porque compartilha recursos
+        "speed": 8,            # Geralmente é rápido porque está em um servidor dedicado
+        "context_length": 7
+    }
+    
+    # Atualizar dicionário de características
+    for model_id in self.router.models:
+        model = self.router.models[model_id]
+        model_type = model.__class__.__name__.lower()
         
-        # Mistral
-        mistral_characteristics = {
-            "creativity": 7,
-            "factual_accuracy": 7,
-            "code_quality": 8,
-            "reasoning": 7,
-            "computation": 6,
-            "conciseness": 6,
-            "language_quality": 7,
-            "cost_efficiency": 5,
-            "speed": 8,
-            "context_length": 6
-        }
-        
-        # DeepSeek
-        deepseek_characteristics = {
-            "creativity": 6,
-            "factual_accuracy": 7,
-            "code_quality": 9,  # Muito bom em código
-            "reasoning": 7,
-            "computation": 7,
-            "conciseness": 7,
-            "language_quality": 6,
-            "cost_efficiency": 6,
-            "speed": 7,
-            "context_length": 6
-        }
-        
-        # Atualizar dicionário de características
-        for model_id in self.router.models:
-            model = self.router.models[model_id]
-            model_type = model.__class__.__name__.lower()
+        if "httpllm" in model_type:
+            # Para modelos HTTP, usar características específicas do HTTP
+            self.model_characteristics[model_id] = http_characteristics.copy()
+            logger.info(f"Características HTTP inicializadas para modelo {model_id}")
+        elif "llama" in model_type or "llama" in model_id.lower():
+            self.model_characteristics[model_id] = llama_characteristics.copy()
+        elif "mistral" in model_type or "mistral" in model_id.lower():
+            self.model_characteristics[model_id] = mistral_characteristics.copy()
+        elif "deepseek" in model_type or "deepseek" in model_id.lower():
+            self.model_characteristics[model_id] = deepseek_characteristics.copy()
+        else:
+            # Modelo desconhecido - usar valores padrão
+            self.model_characteristics[model_id] = self.model_characteristics["default"].copy()
             
-            if "llama" in model_type or "llama" in model_id.lower():
-                self.model_characteristics[model_id] = llama_characteristics.copy()
-            elif "mistral" in model_type or "mistral" in model_id.lower():
-                self.model_characteristics[model_id] = mistral_characteristics.copy()
-            elif "deepseek" in model_type or "deepseek" in model_id.lower():
-                self.model_characteristics[model_id] = deepseek_characteristics.copy()
-            else:
-                # Modelo desconhecido - usar valores padrão
-                self.model_characteristics[model_id] = self.model_characteristics["default"].copy()
-                
-            logger.info(f"Características inicializadas para modelo {model_id}")
+        logger.info(f"Características inicializadas para modelo {model_id}")
     
     def analyze_query_complexity(self, query: str) -> str:
         """
