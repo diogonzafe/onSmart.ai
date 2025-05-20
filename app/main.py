@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+from app.api import orchestration_api
 from app.api import auth, users
 from app.db.database import engine, Base
 from app.api import mcp_api, agents_api
@@ -63,6 +64,7 @@ app.include_router(users.router)
 app.include_router(llm_api.router) 
 app.include_router(mcp_api.router)
 app.include_router(agents_api.router) # Incluir o router LLM API
+app.include_router(orchestration_api.router)
 
 # Comentado até que os módulos sejam criados
 # app.include_router(agents.router)

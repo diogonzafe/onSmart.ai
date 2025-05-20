@@ -11,3 +11,6 @@ python-multipart
 httpx
 redis
 python-dotenv
+langchain
+langgraph
+pydantic
