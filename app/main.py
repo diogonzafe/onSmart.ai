@@ -7,6 +7,11 @@ from app.api import mcp_api, agents_api
 from sqlalchemy import text, inspect
 from app.api import llm_api
 from app.llm import initialize_models_from_config  # Importa a função de inicialização
+import logging
+
+# Configurar logging básico
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Criar todas as tabelas primeiro
 Base.metadata.create_all(bind=engine)
@@ -31,6 +36,10 @@ with engine.connect() as connection:
 
 # Inicializar modelos LLM
 initialize_models_from_config()  # Inicializa os modelos LLM
+
+# Inicializar sistema de templates
+from app.templates.base import get_template_manager
+template_manager = get_template_manager()
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -72,6 +81,32 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# Evento de inicialização da aplicação
+@app.on_event("startup")
+async def startup_event():
+    # Verificar se deve carregar templates padrão
+    try:
+        from app.db.database import SessionLocal
+        from app.models.template import Template
+        
+        db = SessionLocal()
+        template_count = db.query(Template).count()
+        
+        if template_count == 0:
+            print("Nenhum template encontrado. Carregando templates padrão...")
+            
+            # Importar e executar o script de seed
+            from app.scripts.seed_templates import seed_templates
+            seed_templates()
+            
+            print("Templates padrão carregados com sucesso")
+        else:
+            print(f"Encontrados {template_count} templates no banco de dados")
+        
+        db.close()
+    except Exception as e:
+        print(f"Erro durante inicialização: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

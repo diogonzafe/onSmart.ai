@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     
     # LLM Server settings - Properly integrated into the class
     LLM_SERVER_URL: str = "http://192.168.15.35:8000"
-    LLM_SERVER_TIMEOUT: int = 120
+    LLM_SERVER_TIMEOUT: int = 500
     
     # Security
     SECRET_KEY: str
