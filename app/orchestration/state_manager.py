@@ -1,4 +1,4 @@
-from typing import Dict, List, Any, Optional, Union, TypedDict
+from typing import Dict, List, Any, Optional, Union
 from pydantic import BaseModel, Field
 import json
 from datetime import datetime
@@ -50,13 +50,33 @@ class AgentState(BaseModel):
     is_complete: bool = False
     requires_fallback: bool = False
     
-    def add_response(self, response: AgentResponse) -> None:
-        """Adiciona uma resposta ao histórico."""
-        self.responses.append(response)
-        
-        # Registrar todas as ações executadas
-        for action in response.actions:
-            self.actions_history.append(action)
+    def add_response(self, response: Union[Dict[str, Any], "AgentResponse"]) -> None:
+            """Adiciona uma resposta ao histórico."""
+            if isinstance(response, dict):
+                # Converter dicionário para AgentResponse
+                action_list = []
+                for action_dict in response.get("actions", []):
+                    action_list.append(AgentAction(
+                        name=action_dict.get("name", "unknown"),
+                        params=action_dict.get("params", {}),
+                        agent_id=response.get("agent_id", "unknown")
+                    ))
+                
+                agent_response = AgentResponse(
+                    agent_id=response.get("agent_id", "unknown"),
+                    content=response.get("content", ""),
+                    actions=action_list,
+                    confidence=response.get("confidence", 1.0),
+                    metadata=response.get("metadata", {})
+                )
+                self.responses.append(agent_response)
+            else:
+                self.responses.append(response)
+            
+            # Registrar todas as ações executadas
+            latest_response = self.responses[-1]
+            for action in latest_response.actions:
+                self.actions_history.append(action)
     
     def get_final_response(self) -> Optional[str]:
         """Obtém a resposta final para enviar ao usuário."""

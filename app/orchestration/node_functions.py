@@ -33,7 +33,9 @@ async def supervisor_node(state: AgentState) -> AgentState:
     from app.services.agent_service import get_agent_service
     agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
     
-    supervisor_agents = agent_service.list_agents(
+    # Modificado para criar uma lista diretamente
+    # Os testes funcionam sem await porque usam um mock que já retorna uma lista
+    supervisor_agents = await agent_service.list_agents(
         user_id=state.user_id,
         agent_type=AgentType.SUPERVISOR,
         is_active=True
@@ -59,7 +61,7 @@ async def supervisor_node(state: AgentState) -> AgentState:
     # Extrair metadados relevantes da resposta
     selected_dept = response.get("metadata", {}).get("selected_department")
     
-    # Criar resposta do agente
+    # Criar resposta do agente usando a classe AgentResponse
     agent_response = AgentResponse(
         agent_id=supervisor_agents[0].id,
         content=response["message"]["content"],
@@ -109,7 +111,8 @@ async def marketing_node(state: AgentState) -> AgentState:
     from app.services.agent_service import get_agent_service
     agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
     
-    marketing_agents = agent_service.list_agents(
+    # Adicionar await aqui
+    marketing_agents = await agent_service.list_agents(
         user_id=state.user_id,
         agent_type=AgentType.MARKETING,
         is_active=True
@@ -133,7 +136,7 @@ async def marketing_node(state: AgentState) -> AgentState:
             message=state.current_message
         )
         
-        # Criar resposta do agente
+        # Criar resposta do agente usando AgentResponse
         agent_response = AgentResponse(
             agent_id=marketing_agents[0].id,
             content=response["message"]["content"],
@@ -189,6 +192,7 @@ async def fallback_node(state: AgentState) -> AgentState:
     # Criar resposta de fallback
     agent_id = "fallback_system"
     
+    # Usar a classe AgentResponse em vez de um dicionário
     fallback_response = AgentResponse(
         agent_id=agent_id,
         content="Não foi possível processar sua solicitação com nossos agentes especializados. " +

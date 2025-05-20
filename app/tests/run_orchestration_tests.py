@@ -17,7 +17,7 @@ def run_tests():
     print(" TESTES DA ORQUESTRAÇÃO DE AGENTES COM LANGGRAPH ".center(80, "="))
     print("=" * 80 + "\n")
     
-    # Descobrir testes
+    # Descobrir testes - apenas em test_orchestration
     test_loader = unittest.TestLoader()
     test_suite = test_loader.discover('app/tests/test_orchestration', pattern='test_*.py')
     

@@ -5,7 +5,18 @@ import uuid
 import time
 
 from app.orchestration import Orchestrator, get_orchestrator
-from app.orchestration.state_manager import AgentState
+from app.orchestration.state_manager import AgentState, AgentResponse
+
+# Função auxiliar para executar coroutines nos testes
+def executar_async(coro):
+    """Auxiliar para executar testes assíncronos."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 class TestOrchestrator(unittest.TestCase):
     """Testes para o orquestrador principal."""
@@ -29,8 +40,12 @@ class TestOrchestrator(unittest.TestCase):
         self.assertEqual(self.orchestrator.graph_builder, self.mock_graph_builder)
         self.assertEqual(self.orchestrator.execution_graph, self.mock_execution_graph)
     
-    async def test_process_message_success(self):
+    def test_process_message_success(self):
         """Testa o processamento de mensagem com sucesso."""
+        return executar_async(self._test_process_message_success())
+        
+    async def _test_process_message_success(self):
+        """Implementação assíncrona do teste de processamento com sucesso."""
         conversation_id = str(uuid.uuid4())
         user_id = str(uuid.uuid4())
         message = "Teste de mensagem"
@@ -41,12 +56,14 @@ class TestOrchestrator(unittest.TestCase):
             user_id=user_id,
             current_message=message
         )
-        final_state.add_response(
-            agent_response={
-                "agent_id": "agent123",
-                "content": "Resposta final"
-            }
+        
+        # Criar e adicionar uma resposta usando a classe AgentResponse
+        response = AgentResponse(
+            agent_id="agent123",
+            content="Resposta final"
         )
+        final_state.add_response(response)
+        
         final_state.processing_times = {"agent123": 0.5, "agent456": 0.3}
         
         # Configurar o mock para retornar o estado final
@@ -70,8 +87,12 @@ class TestOrchestrator(unittest.TestCase):
         self.assertIn("agent123", result["agents_involved"])
         self.assertIn("agent456", result["agents_involved"])
     
-    async def test_process_message_error(self):
+    def test_process_message_error(self):
         """Testa o processamento de mensagem com erro."""
+        return executar_async(self._test_process_message_error())
+        
+    async def _test_process_message_error(self):
+        """Implementação assíncrona do teste de processamento com erro."""
         conversation_id = str(uuid.uuid4())
         user_id = str(uuid.uuid4())
         message = "Teste de mensagem"

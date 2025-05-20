@@ -1,7 +1,6 @@
-from typing import Dict, List, Any, Optional, Callable, TypeVar
+from typing import Dict, List, Any, Optional, Callable
 from langgraph.graph import StateGraph
 import langgraph.graph as lg
-from pydantic import BaseModel
 
 from app.orchestration.state_manager import AgentState
 from app.orchestration.node_functions import supervisor_node, marketing_node, fallback_node
@@ -48,6 +47,10 @@ class GraphBuilder:
         graph.add_node("marketing", marketing_node)
         graph.add_node("fallback", fallback_node)
         
+        # Adicionar um nó de encerramento (end node) que apenas retorna o estado
+        # Este nó substituirá o None que estávamos usando
+        graph.add_node("end", lambda state: state)
+        
         # Adicionar arestas condicionais a partir do supervisor
         graph.add_conditional_edges(
             "supervisor",
@@ -55,7 +58,7 @@ class GraphBuilder:
             {
                 "marketing": "marketing",
                 "fallback": "fallback",
-                "complete": None  # Encerrar o fluxo
+                "complete": "end"  # Usar "end" em vez de None
             }
         )
         
@@ -67,9 +70,6 @@ class GraphBuilder:
         
         # Definir o ponto de entrada do grafo
         graph.set_entry_point("supervisor")
-        
-        # Adicionar condição de término
-        graph.add_edge_filter(should_end)
         
         # Compilar o grafo
         return graph.compile()

@@ -7,6 +7,17 @@ from app.orchestration.state_manager import AgentState, AgentResponse, AgentActi
 from app.orchestration.node_functions import supervisor_node, marketing_node, fallback_node
 from app.models.agent import AgentType
 
+# Função auxiliar para executar coroutines nos testes
+def executar_async(coro):
+    """Auxiliar para executar testes assíncronos."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
 class TestNodeFunctions(unittest.TestCase):
     """Testes para as funções de nó do grafo."""
 
@@ -21,10 +32,14 @@ class TestNodeFunctions(unittest.TestCase):
             current_message="Teste de mensagem"
         )
     
-    @patch('app.orchestration.node_functions.get_agent_service')
+    @patch('app.services.agent_service.get_agent_service')  # Caminho corrigido
     @patch('app.orchestration.node_functions.create_agent')
-    async def test_supervisor_node(self, mock_create_agent, mock_get_service):
+    def test_supervisor_node(self, mock_create_agent, mock_get_service):
         """Testa o nó do supervisor."""
+        return executar_async(self._test_supervisor_node(mock_create_agent, mock_get_service))
+        
+    async def _test_supervisor_node(self, mock_create_agent, mock_get_service):
+        """Implementação assíncrona do teste do nó supervisor."""
         # Configurar mocks
         mock_agent_service = AsyncMock()
         mock_get_service.return_value = mock_agent_service
@@ -77,10 +92,14 @@ class TestNodeFunctions(unittest.TestCase):
         self.assertEqual(result_state.next_agent_id, "marketing")
         self.assertFalse(result_state.is_complete)
     
-    @patch('app.orchestration.node_functions.get_agent_service')
+    @patch('app.services.agent_service.get_agent_service')  # Caminho corrigido
     @patch('app.orchestration.node_functions.create_agent')
-    async def test_marketing_node(self, mock_create_agent, mock_get_service):
+    def test_marketing_node(self, mock_create_agent, mock_get_service):
         """Testa o nó de marketing."""
+        return executar_async(self._test_marketing_node(mock_create_agent, mock_get_service))
+        
+    async def _test_marketing_node(self, mock_create_agent, mock_get_service):
+        """Implementação assíncrona do teste do nó de marketing."""
         # Configurar mocks
         mock_agent_service = AsyncMock()
         mock_get_service.return_value = mock_agent_service
@@ -139,10 +158,14 @@ class TestNodeFunctions(unittest.TestCase):
         self.assertFalse(result_state.is_complete)
         self.assertFalse(result_state.requires_fallback)
     
-    @patch('app.orchestration.node_functions.get_agent_service')
+    @patch('app.services.agent_service.get_agent_service')  # Caminho corrigido
     @patch('app.orchestration.node_functions.create_agent')
-    async def test_marketing_node_error(self, mock_create_agent, mock_get_service):
+    def test_marketing_node_error(self, mock_create_agent, mock_get_service):
         """Testa o nó de marketing com erro."""
+        return executar_async(self._test_marketing_node_error(mock_create_agent, mock_get_service))
+        
+    async def _test_marketing_node_error(self, mock_create_agent, mock_get_service):
+        """Implementação assíncrona do teste do nó de marketing com erro."""
         # Configurar mocks
         mock_agent_service = AsyncMock()
         mock_get_service.return_value = mock_agent_service
@@ -162,8 +185,12 @@ class TestNodeFunctions(unittest.TestCase):
         # Verificar que o estado indica fallback necessário
         self.assertTrue(result_state.requires_fallback)
     
-    async def test_fallback_node(self):
+    def test_fallback_node(self):
         """Testa o nó de fallback."""
+        return executar_async(self._test_fallback_node())
+        
+    async def _test_fallback_node(self):
+        """Implementação assíncrona do teste do nó de fallback."""
         # Definir agente atual
         self.state.current_agent_id = "marketing123"
         
