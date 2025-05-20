@@ -136,18 +136,27 @@ class Orchestrator:
         
         # Se houver respostas, retornar o conteúdo da última
         if responses:
-            # Pegar a última resposta não-supervisor (se possível)
-            # Os testes esperam a resposta do último agente na cadeia, não do supervisor
-            non_supervisor_responses = [
+            # Priorizar a resposta do fallback se existir
+            fallback_responses = [
                 r for r in responses 
-                if (hasattr(r, "agent_id") and not r.agent_id.startswith("supervisor")) or
-                   (isinstance(r, dict) and r.get("agent_id") and not r.get("agent_id").startswith("supervisor"))
+                if (hasattr(r, "agent_id") and r.agent_id == "fallback_system") or
+                   (isinstance(r, dict) and r.get("agent_id") == "fallback_system")
             ]
             
-            if non_supervisor_responses:
-                last_response = non_supervisor_responses[-1]
+            if fallback_responses:
+                last_response = fallback_responses[-1]
             else:
-                last_response = responses[-1]  # Se não houver não-supervisor, use a última
+                # Pegar a última resposta não-supervisor (se possível)
+                non_supervisor_responses = [
+                    r for r in responses 
+                    if (hasattr(r, "agent_id") and not r.agent_id.startswith("supervisor")) or
+                       (isinstance(r, dict) and r.get("agent_id") and not r.get("agent_id").startswith("supervisor"))
+                ]
+                
+                if non_supervisor_responses:
+                    last_response = non_supervisor_responses[-1]
+                else:
+                    last_response = responses[-1]  # Se não houver não-supervisor, use a última
             
             # Extrair conteúdo
             if hasattr(last_response, "content"):

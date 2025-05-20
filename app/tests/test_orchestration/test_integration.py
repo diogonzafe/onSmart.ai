@@ -55,11 +55,13 @@ class TestOrchestrationIntegration(unittest.TestCase):
         mock_marketing_node.side_effect = marketing_effect
         
         # Fallback não deve ser chamado neste fluxo
-        mock_fallback_node.side_effect = AsyncMock()
+        async def fallback_mock(state):
+            return state  # Apenas retorna o estado sem modificar
+        
+        mock_fallback_node.side_effect = fallback_mock
         
         # Criar orquestrador com mocks
-        with patch('app.orchestration.routing_logic.should_end', return_value=False):
-            orchestrator = Orchestrator(Mock())
+        orchestrator = Orchestrator(Mock())
         
         # Processar uma mensagem
         conversation_id = str(uuid.uuid4())
@@ -77,7 +79,7 @@ class TestOrchestrationIntegration(unittest.TestCase):
         self.assertGreaterEqual(len(result["agent_responses"]), 2)  # Supervisor e Marketing
         
         # Verificar ordem de chamadas
-        self.assertEqual(mock_supervisor_node.call_count, 1)
+        self.assertEqual(mock_supervisor_node.call_count, 2)  # Agora esperamos 2 chamadas
         self.assertEqual(mock_marketing_node.call_count, 1)
         self.assertEqual(mock_fallback_node.call_count, 0)  # Não deve ser chamado
     
@@ -92,11 +94,15 @@ class TestOrchestrationIntegration(unittest.TestCase):
         """Implementação assíncrona do teste de fluxo de fallback."""
         # Configurar mocks para simular o comportamento dos nós
         
-        # Nó supervisor direciona para marketing
+        # Nó supervisor direciona para marketing e depois para fallback
         async def supervisor_effect(state):
             if state.requires_fallback:
-                # Segunda chamada após fallback
-                state.is_complete = True
+                # Quando retorna do marketing com requires_fallback=True
+                state.add_response(AgentResponse(
+                    agent_id="supervisor123",
+                    content="Direcionando para fallback",
+                    metadata={"selected_department": "fallback"}
+                ))
                 return state
                 
             # Primeira chamada
@@ -123,13 +129,13 @@ class TestOrchestrationIntegration(unittest.TestCase):
                 content="Resposta de fallback",
                 metadata={"fallback": True}
             ))
+            state.is_complete = True  # Marcar como completo para encerrar o fluxo
             return state
         
         mock_fallback_node.side_effect = fallback_effect
         
-        # Criar orquestrador com mocks - Removi o patch da expressão lambda
-        with patch('app.orchestration.routing_logic.should_end', return_value=False):
-            orchestrator = Orchestrator(Mock())
+        # Criar orquestrador sem patch de should_end
+        orchestrator = Orchestrator(Mock())
         
         # Processar uma mensagem
         conversation_id = str(uuid.uuid4())
@@ -146,9 +152,9 @@ class TestOrchestrationIntegration(unittest.TestCase):
         self.assertEqual(result["response"], "Resposta de fallback")
         
         # Verificar ordem de chamadas
-        self.assertGreaterEqual(mock_supervisor_node.call_count, 1)
+        self.assertEqual(mock_supervisor_node.call_count, 3)  # Agora esperamos 3 chamadas
         self.assertEqual(mock_marketing_node.call_count, 1)
         self.assertEqual(mock_fallback_node.call_count, 1)
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()
