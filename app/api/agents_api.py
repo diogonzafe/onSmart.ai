@@ -143,3 +143,64 @@ async def send_message_to_agent(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro ao processar resposta: {str(e)}")
+    
+    # Adicionar ao final do arquivo app/api/agents_api.py
+
+@router.post("/create")  # Adiciona um endpoint alternativo para criação de agente
+async def create_agent_endpoint(
+    name: str = Body(...),
+    description: str = Body(...),
+    agent_type: AgentType = Body(...),
+    template_id: str = Body(...),
+    configuration: Dict[str, Any] = Body({}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Cria um novo agente.
+    Endpoint alternativo para o método POST / que está dando erro 405.
+    """
+    # Obter o serviço de agentes
+    from app.services.agent_service import get_agent_service
+    agent_service = get_agent_service(db)
+    
+    try:
+        agent = agent_service.create_agent(
+            user_id=current_user.id,
+            name=name,
+            description=description,
+            agent_type=agent_type,
+            template_id=template_id,
+            configuration=configuration
+        )
+        
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "type": agent.type.value,
+            "template_id": agent.template_id,
+            "message": "Agente criado com sucesso"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+@router.get("/supervisor")
+async def get_supervisor_agent(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retorna o primeiro agente supervisor disponível para o usuário."""
+    supervisor = db.query(Agent).filter(
+        Agent.user_id == current_user.id,
+        Agent.type == AgentType.SUPERVISOR,
+        Agent.is_active == True
+    ).first()
+    
+    if not supervisor:
+        raise HTTPException(status_code=404, detail="Nenhum agente supervisor encontrado")
+    
+    return {
+        "id": supervisor.id,
+        "name": supervisor.name,
+        "type": supervisor.type.value
+    }

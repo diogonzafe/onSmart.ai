@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api import orchestration_api
@@ -7,7 +7,7 @@ from app.db.database import engine, Base
 from app.api import mcp_api, agents_api
 from sqlalchemy import text, inspect
 from app.api import llm_api
-from app.llm import initialize_models_from_config  # Importa a função de inicialização
+from app.llm import initialize_models_from_config
 import logging
 
 # Configurar logging básico
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Criar todas as tabelas primeiro
 Base.metadata.create_all(bind=engine)
 
-# Inicializar pgvector e criar o índice apenas depois que as tabelas forem criadas
+# Inicializar pgvector e criar o índice depois que as tabelas forem criadas
 with engine.connect() as connection:
     # Criar a extensão vector
     connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
@@ -61,16 +61,37 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(users.router)
-app.include_router(llm_api.router) 
+app.include_router(llm_api.router)
 app.include_router(mcp_api.router)
-app.include_router(agents_api.router) # Incluir o router LLM API
+app.include_router(agents_api.router)
 app.include_router(orchestration_api.router)
 
-# Comentado até que os módulos sejam criados
-# app.include_router(agents.router)
-# app.include_router(templates.router)
-# app.include_router(conversations.router)
-# app.include_router(tools.router)
+# Criar e incluir os novos routers
+templates_router = APIRouter(prefix="/api/templates", tags=["templates"])
+conversations_router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+metrics_router = APIRouter(prefix="/api/metrics", tags=["metrics"])
+
+# Importar e incluir os routers (se os arquivos existirem)
+try:
+    from app.api import templates_api
+    app.include_router(templates_api.router)
+except ImportError:
+    app.include_router(templates_router)
+    logger.warning("Módulo templates_api não encontrado. Usando router padrão.")
+
+try:
+    from app.api import conversations_api
+    app.include_router(conversations_api.router)
+except ImportError:
+    app.include_router(conversations_router)
+    logger.warning("Módulo conversations_api não encontrado. Usando router padrão.")
+
+try:
+    from app.api import metrics_api
+    app.include_router(metrics_api.router)
+except ImportError:
+    app.include_router(metrics_router)
+    logger.warning("Módulo metrics_api não encontrado. Usando router padrão.")
 
 @app.get("/")
 async def root():
@@ -83,6 +104,18 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.get("/api/debug/endpoints")
+async def list_endpoints():
+    """Lista todos os endpoints registrados para depuração."""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": list(route.methods) if hasattr(route, "methods") else None
+        })
+    return {"routes": routes}
 
 # Evento de inicialização da aplicação
 @app.on_event("startup")
