@@ -5,7 +5,11 @@ from unittest.mock import MagicMock, patch
 import json
 
 from app.main import app
-from app.api.batch_api import router as batch_router
+# Update the import path below if batch_api is located elsewhere in your project structure
+# For example, if batch_api.py is in app/batch_api.py, use:
+# from app.batch_api import router as batch_router
+
+from app.api.bath_api import router as batch_router
 
 # Adicionar router ao app para testes
 app.include_router(batch_router)
