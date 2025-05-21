@@ -1,42 +1,50 @@
+# app/schemas/agent.py
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
 from datetime import datetime
-from app.models.conversation import ConversationStatus
+from app.models.agent import AgentType
 
-# Base schema
-class ConversationBase(BaseModel):
-    title: str
-    metadata: Optional[Dict[str, Any]] = None
+# Base schema para agentes
+class AgentBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    agent_type: AgentType
+    configuration: Dict[str, Any] = Field(default_factory=dict)
 
-# Para criação
-class ConversationCreate(ConversationBase):
+# Para criação de agentes
+class AgentCreate(AgentBase):
+    template_id: str
+
+# Para atualização de agentes
+class AgentUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    configuration: Optional[Dict[str, Any]] = None
+
+# Para atualizações em lote de agentes
+class AgentBatchUpdate(BaseModel):
     agent_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    configuration: Optional[Dict[str, Any]] = None
 
-# Para atualização
-class ConversationUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[ConversationStatus] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-# Para respostas
-class Conversation(ConversationBase):
+# Para respostas de agentes
+class Agent(AgentBase):
     id: str
     user_id: str
-    agent_id: str
-    status: ConversationStatus
+    template_id: str
+    is_active: bool
     created_at: datetime
     updated_at: datetime
     
     class Config:
         from_attributes = True
 
-# Com mensagens incluídas
-class ConversationWithMessages(Conversation):
-    messages: List["Message"] = []
+# Modelo de agente com ferramentas incluídas
+class AgentWithTools(Agent):
+    tools: List[Any] = []
     
     class Config:
         from_attributes = True
-
-# Resolução da referência circular - COLOQUE ISSO NO FINAL DO ARQUIVO
-from app.schemas.message import Message
-ConversationWithMessages.model_rebuild()

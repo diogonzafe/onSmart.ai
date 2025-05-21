@@ -27,6 +27,17 @@ class TemplateUpdate(BaseModel):
     tools_config: Optional[Dict[str, Any]] = None
     llm_config: Optional[Dict[str, Any]] = None
 
+# Para atualizações em lote
+class TemplateBatchUpdate(BaseModel):
+    template_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    department: Optional[TemplateDepartment] = None
+    is_public: Optional[bool] = None
+    prompt_template: Optional[str] = None
+    tools_config: Optional[Dict[str, Any]] = None
+    llm_config: Optional[Dict[str, Any]] = None
+
 # Para respostas
 class Template(TemplateBase):
     id: str
@@ -36,3 +47,4 @@ class Template(TemplateBase):
     
     class Config:
         from_attributes = True
+

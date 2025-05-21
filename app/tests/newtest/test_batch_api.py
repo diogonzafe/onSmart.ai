@@ -2,6 +2,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+from app.core.security import get_current_active_user
 import json
 
 from app.main import app
@@ -9,7 +10,8 @@ from app.main import app
 # For example, if batch_api.py is in app/batch_api.py, use:
 # from app.batch_api import router as batch_router
 
-from app.api.bath_api import router as batch_router
+from app.api.batch_api import router as batch_router
+
 
 # Adicionar router ao app para testes
 app.include_router(batch_router)
@@ -21,7 +23,7 @@ async def mock_get_current_user():
     user.id = "user-123"
     return user
 
-app.dependency_overrides[app.routes[-1].dependencies[0].dependency] = mock_get_current_user
+app.dependency_overrides[get_current_active_user] = mock_get_current_user
 
 class TestBatchOperations:
     @pytest.fixture

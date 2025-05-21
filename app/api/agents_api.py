@@ -12,6 +12,7 @@ from app.models.template import Template
 from app.models.message import Message, MessageRole
 from app.core.security import get_current_active_user
 from app.llm.mcp_llm_service import get_mcp_llm_service
+from app.services.agent_service import get_agent_service
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 

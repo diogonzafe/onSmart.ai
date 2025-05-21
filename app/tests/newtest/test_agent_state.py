@@ -117,56 +117,65 @@ class TestConversationService:
         # Verificar se a mensagem foi processada
         conversation_service.agent_service.process_message.assert_called_once()
     
-    def test_detect_stuck_conversations(self, conversation_service):
-        """Testa a detecção de conversas paralisadas."""
-        # Mock para conversas
-        conversation1 = MagicMock(spec=Conversation)
-        conversation1.id = "conv-1"
-        conversation2 = MagicMock(spec=Conversation)
-        conversation2.id = "conv-2"
+def test_detect_stuck_conversations(self, conversation_service):
+    """Testa a detecção de conversas paralisadas."""
+    # Mock para conversas
+    conversation1 = MagicMock(spec=Conversation)
+    conversation1.id = "conv-1"
+    conversation2 = MagicMock(spec=Conversation)
+    conversation2.id = "conv-2"
+    
+    # Mock para mensagens
+    message1 = MagicMock(spec=Message)
+    message1.role = MessageRole.HUMAN  # Última mensagem do usuário (stuck)
+    
+    message2 = MagicMock(spec=Message)
+    message2.role = MessageRole.AGENT  # Última mensagem do agente (não stuck)
+    
+    # Configurar mocks
+    conversation_service.db.query.return_value.filter.return_value.all.return_value = [
+        conversation1, conversation2
+    ]
+    
+    # Configurar um mock melhor para lidar com o encadeamento
+    # Configurando o primeiro nível de retorno
+    mock_query = MagicMock()
+    conversation_service.db.query.return_value = mock_query
+    
+    # Configurar filtros específicos
+    def get_messages_for_conversation(conv_id):
+        if conv_id == "conv-1":
+            return [message1]
+        else:
+            return [message2]
+    
+    # Configurando o mock para retornar o resultado correto com base no ID da conversa
+    def get_filter_mock(*args, **kwargs):
+        mock_filter = MagicMock()
         
-        # Mock para mensagens
-        message1 = MagicMock(spec=Message)
-        message1.role = MessageRole.HUMAN  # Última mensagem do usuário (stuck)
-        
-        message2 = MagicMock(spec=Message)
-        message2.role = MessageRole.AGENT  # Última mensagem do agente (não stuck)
-        
-        # Configurar mocks
-        conversation_service.db.query.return_value.filter.return_value.all.return_value = [
-            conversation1, conversation2
-        ]
-        
-        # Configurar mock para última mensagem de cada conversa
-        def mock_query_message(Message):
-            mock = MagicMock()
+        def order_by_mock(*args, **kwargs):
+            mock_order = MagicMock()
             
-            def mock_filter(*args, **kwargs):
-                mock_filter = MagicMock()
+            def first_mock():
+                # Determine qual conversa está sendo pesquisada pelo filtro
+                for arg in args:
+                    if "conv-1" in str(arg):
+                        return message1
+                    elif "conv-2" in str(arg):
+                        return message2
+                return None
                 
-                def mock_order_by(*args, **kwargs):
-                    mock_order = MagicMock()
-                    
-                    def mock_first():
-                        if kwargs.get("Message.conversation_id") == "conv-1":
-                            return message1
-                        else:
-                            return message2
-                    
-                    mock_order.first = mock_first
-                    return mock_order
-                
-                mock_filter.order_by = mock_order_by
-                return mock_filter
+            mock_order.first = first_mock
+            return mock_order
             
-            mock.filter = mock_filter
-            return mock
+        mock_filter.order_by = order_by_mock
+        return mock_filter
         
-        conversation_service.db.query.side_effect = mock_query_message
-        
-        # Chamar o método
-        result = conversation_service.detect_stuck_conversations(timeout_minutes=30)
-        
-        # Verificar resultado
-        assert "conv-1" in result  # Conversa com última mensagem do usuário
-        assert "conv-2" not in result  # Conversa com última mensagem do agente
+    mock_query.filter = get_filter_mock
+    
+    # Chamar o método
+    result = conversation_service.detect_stuck_conversations(timeout_minutes=30)
+    
+    # Verificar resultado
+    assert len(result) == 1
+    assert "conv-1" in result

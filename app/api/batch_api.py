@@ -9,6 +9,8 @@ from app.models.user import User
 from app.core.security import get_current_active_user
 from app.schemas.agent import AgentBatchUpdate, AgentCreate
 from app.schemas.template import TemplateBatchUpdate
+from app.services.agent_service import get_agent_service
+from app.services.template_service import get_template_service
 
 router = APIRouter(prefix="/api/batch", tags=["batch"])
 

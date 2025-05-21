@@ -1,11 +1,13 @@
 # app/core/sharded_cache.py
+
+from __future__ import annotations
 from typing import Dict, List, Any, Optional, Union
 import logging
 import redis.asyncio as redis
 import json
 import pickle
 import hashlib
-from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
