@@ -176,7 +176,7 @@ class AgentService:
         
         return agent
     
-    def list_agents(self, 
+    async def list_agents(self, 
                   user_id: str, 
                   agent_type: Optional[AgentType] = None, 
                   is_active: bool = True) -> List[Agent]:

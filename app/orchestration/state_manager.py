@@ -50,6 +50,9 @@ class AgentState(BaseModel):
     is_complete: bool = False
     requires_fallback: bool = False
     
+    # Adicionar campo para a sessão do banco de dados
+    db_session: Optional[Any] = None
+    
     def add_response(self, response: Union[Dict[str, Any], "AgentResponse"]) -> None:
             """Adiciona uma resposta ao histórico."""
             if isinstance(response, dict):

@@ -31,7 +31,7 @@ async def supervisor_node(state: AgentState) -> AgentState:
     
     # Obter instância do agente supervisor
     from app.services.agent_service import get_agent_service
-    agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
+    agent_service = get_agent_service(state.db_session)  # Usar a sessão do estado
     
     # Modificado para criar uma lista diretamente
     # Os testes funcionam sem await porque usam um mock que já retorna uma lista
@@ -48,7 +48,7 @@ async def supervisor_node(state: AgentState) -> AgentState:
     
     supervisor_agent = create_agent(
         agent_type=AgentType.SUPERVISOR,
-        db=None,  # Será substituído na chamada real
+        db=state.db_session,  # Usar a sessão do estado
         agent_record=supervisor_agents[0]
     )
     
@@ -109,7 +109,7 @@ async def marketing_node(state: AgentState) -> AgentState:
     
     # Obter instância do agente de marketing
     from app.services.agent_service import get_agent_service
-    agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
+    agent_service = get_agent_service(state.db_session)  # Usar a sessão do estado
     
     # Adicionar await aqui
     marketing_agents = await agent_service.list_agents(
@@ -125,7 +125,7 @@ async def marketing_node(state: AgentState) -> AgentState:
     
     marketing_agent = create_agent(
         agent_type=AgentType.MARKETING,
-        db=None,  # Será substituído na chamada real
+        db=state.db_session,  # Usar a sessão do estado
         agent_record=marketing_agents[0]
     )
     
@@ -174,8 +174,6 @@ async def marketing_node(state: AgentState) -> AgentState:
     
     return state
 
-# Adicionar em app/orchestration/node_functions.py
-
 async def sales_node(state: AgentState) -> AgentState:
     """
     Nó de vendas que processa mensagens relacionadas a vendas.
@@ -193,7 +191,7 @@ async def sales_node(state: AgentState) -> AgentState:
     
     # Obter instância do agente de vendas
     from app.services.agent_service import get_agent_service
-    agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
+    agent_service = get_agent_service(state.db_session)  # Usar a sessão do estado
     
     sales_agents = await agent_service.list_agents(
         user_id=state.user_id,
@@ -208,7 +206,7 @@ async def sales_node(state: AgentState) -> AgentState:
     
     sales_agent = create_agent(
         agent_type=AgentType.SALES,
-        db=None,  # Será substituído na chamada real
+        db=state.db_session,  # Usar a sessão do estado
         agent_record=sales_agents[0]
     )
     
@@ -274,7 +272,7 @@ async def finance_node(state: AgentState) -> AgentState:
     
     # Obter instância do agente de finanças
     from app.services.agent_service import get_agent_service
-    agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
+    agent_service = get_agent_service(state.db_session)  # Usar a sessão do estado
     
     finance_agents = await agent_service.list_agents(
         user_id=state.user_id,
@@ -289,7 +287,7 @@ async def finance_node(state: AgentState) -> AgentState:
     
     finance_agent = create_agent(
         agent_type=AgentType.FINANCE,
-        db=None,  # Será substituído na chamada real
+        db=state.db_session,  # Usar a sessão do estado
         agent_record=finance_agents[0]
     )
     

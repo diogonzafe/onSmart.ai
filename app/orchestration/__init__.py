@@ -64,7 +64,8 @@ class Orchestrator:
                     "content": message,
                     "metadata": metadata or {}
                 }
-            ]
+            ],
+            db_session=self.db_session  # Adicionar a sessão ao estado
         )
         
         try:
@@ -252,18 +253,14 @@ class Orchestrator:
 _orchestrator_instance = None
 
 def get_orchestrator(db_session=None) -> Orchestrator:
-    """
-    Obtém a instância do orquestrador.
-    
-    Args:
-        db_session: Sessão do banco de dados (opcional)
-        
-    Returns:
-        Instância do Orchestrator
-    """
     global _orchestrator_instance
     
     if _orchestrator_instance is None:
         _orchestrator_instance = Orchestrator(db_session)
+    elif db_session is not None:
+        # Atualizar a sessão do banco de dados se uma for fornecida
+        _orchestrator_instance.db_session = db_session
+        # Também atualizar a sessão no GraphBuilder
+        _orchestrator_instance.graph_builder.db_session = db_session
     
     return _orchestrator_instance
