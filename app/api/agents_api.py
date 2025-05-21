@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.models.user import User
 from app.models.agent import Agent, AgentType
 from app.models.conversation import Conversation, ConversationStatus
+from app.models.template import Template
 from app.models.message import Message, MessageRole
 from app.core.security import get_current_active_user
 from app.llm.mcp_llm_service import get_mcp_llm_service
@@ -204,3 +205,78 @@ async def get_supervisor_agent(
         "name": supervisor.name,
         "type": supervisor.type.value
     }
+
+# app/api/agents_api.py - Adicionar método PATCH
+
+@router.patch("/{agent_id}")
+async def patch_agent(
+    agent_id: str,
+    update_data: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Atualiza parcialmente um agente existente."""
+    # Verificar se o agente existe e pertence ao usuário
+    agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        Agent.user_id == current_user.id
+    ).first()
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agente não encontrado")
+    
+    # Atualizar apenas os campos fornecidos
+    from app.services.agent_service import get_agent_service
+    agent_service = get_agent_service(db)
+    
+    try:
+        updated_agent = agent_service.update_agent(
+            agent_id=agent_id,
+            name=update_data.get("name"),
+            description=update_data.get("description"),
+            is_active=update_data.get("is_active"),
+            configuration=update_data.get("configuration")
+        )
+        
+        return updated_agent
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# app/api/templates_api.py - Adicionar método PATCH
+
+@router.patch("/{template_id}")
+async def patch_template(
+    template_id: str,
+    update_data: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Atualiza parcialmente um template existente."""
+    # Verificar se o template existe e pertence ao usuário
+    template = db.query(Template).filter(
+        Template.id == template_id,
+        Template.user_id == current_user.id
+    ).first()
+    
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    
+    # Atualizar apenas os campos fornecidos
+    from app.services.template_service import get_template_service
+    template_service = get_template_service(db)
+    
+    try:
+        updated_template = template_service.update_template(
+            template_id=template_id,
+            name=update_data.get("name"),
+            description=update_data.get("description"),
+            department=update_data.get("department"),
+            is_public=update_data.get("is_public"),
+            prompt_template=update_data.get("prompt_template"),
+            tools_config=update_data.get("tools_config"),
+            llm_config=update_data.get("llm_config")
+        )
+        
+        return updated_template
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

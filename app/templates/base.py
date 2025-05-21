@@ -1,8 +1,9 @@
 # app/templates/base.py
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, AsyncGenerator
 import logging
 import json
 import re
+import asyncio
 from datetime import datetime
 
 from app.models.template import Template, TemplateDepartment
@@ -73,20 +74,22 @@ class TemplateManager:
         logger.info(f"Template {template.name} ({template_id}) carregado com {len(processed_template['variables'])} variáveis")
         return processed_template
     
-    def render_template(self, 
-                      template_id: str, 
-                      variables: Dict[str, Any],
-                      validate: bool = True) -> str:
+    # app/templates/base.py - Modificar a função render_template para suportar streaming
+
+    async def render_template_streaming(self, 
+                                template_id: str, 
+                                variables: Dict[str, Any],
+                                validate: bool = True) -> AsyncGenerator[str, None]:
         """
-        Renderiza um template com as variáveis fornecidas.
+        Renderiza um template com streaming para o frontend.
         
         Args:
-            template_id: ID do template a ser renderizado
-            variables: Dicionário com valores das variáveis
-            validate: Se deve validar as variáveis antes de renderizar
+            template_id: ID do template
+            variables: Variáveis para o template
+            validate: Se deve validar variáveis
             
-        Returns:
-            Template renderizado
+        Yields:
+            Chunks do template renderizado
         """
         if template_id not in self.template_cache:
             raise ValueError(f"Template {template_id} não encontrado no cache")
@@ -111,8 +114,15 @@ class TemplateManager:
             
             rendered_template = rendered_template.replace(placeholder, value)
         
-        logger.debug(f"Template {template_id} renderizado com sucesso")
-        return rendered_template
+        # Simular streaming de chunks para frontend
+        chunk_size = 100  # Caracteres por chunk
+        chunks = [rendered_template[i:i+chunk_size] 
+                for i in range(0, len(rendered_template), chunk_size)]
+        
+        for chunk in chunks:
+            # Simular algum processamento
+            await asyncio.sleep(0.05)
+            yield chunk
     
     def update_template(self, 
                       template: Template, 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Enum as SQLEnum, ForeignKey, JSON
+from sqlalchemy import Column, String, DateTime, Enum as SQLEnum, ForeignKey, JSON, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -25,3 +25,7 @@ class Conversation(Base):
     user = relationship("User", back_populates="conversations")
     agent = relationship("Agent", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+    __table_args__ = (
+    Index('idx_conversations_user_status', user_id, status),
+)

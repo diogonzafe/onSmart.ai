@@ -23,7 +23,9 @@ class Tool(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     
     # Relacionamentos
     user = relationship("User", back_populates="tools")
     agent_mappings = relationship("AgentToolMapping", back_populates="tool")
+    organization = relationship("Organization", back_populates="tools")

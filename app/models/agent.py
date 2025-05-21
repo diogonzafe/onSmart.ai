@@ -25,9 +25,11 @@ class Agent(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     
     # Relacionamentos
     user = relationship("User", back_populates="agents")
     template = relationship("Template", back_populates="agents")
     conversations = relationship("Conversation", back_populates="agent")
     tool_mappings = relationship("AgentToolMapping", back_populates="agent")
+    organization = relationship("Organization", back_populates="agents")

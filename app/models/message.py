@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Enum as SQLEnum, ForeignKey, JSON, Text
+from sqlalchemy import Column, String, DateTime, Enum as SQLEnum, ForeignKey, JSON, Text, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -24,3 +24,8 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
     embedding = relationship("MessageEmbedding", uselist=False, back_populates="message", cascade="all, delete-orphan")
     feedback = relationship("UserFeedback", uselist=False, back_populates="message", cascade="all, delete-orphan")
+
+    __table_args__ = (
+    Index('idx_messages_conversation', conversation_id),
+    Index('idx_messages_conversation_created', conversation_id, created_at),
+)

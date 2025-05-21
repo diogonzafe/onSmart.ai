@@ -1,7 +1,7 @@
 # app/api/templates_api.py
 from fastapi import APIRouter, Depends, HTTPException, Body, Path
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from app.db.database import get_db
 from app.models.user import User
@@ -155,3 +155,54 @@ async def get_template_variables(
         return variables
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    
+# app/api/templates_api.py - Adicionar endpoints
+
+@router.post("/preview")
+async def preview_template(
+    template_data: Dict[str, Any] = Body(...),
+    variables: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Gera um preview de um template sem salvá-lo."""
+    template_service = get_template_service(db)
+    
+    try:
+        preview = template_service.preview_template(template_data, variables)
+        return {"preview": preview}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{template_id}/draft")
+async def create_draft(
+    template_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Cria um rascunho a partir de um template existente."""
+    template_service = get_template_service(db)
+    
+    try:
+        draft = template_service.create_draft_from_template(
+            template_id=template_id,
+            user_id=current_user.id
+        )
+        return draft
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{draft_id}/publish")
+async def publish_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Publica um rascunho."""
+    template_service = get_template_service(db)
+    
+    try:
+        published = template_service.publish_draft(draft_id)
+        return published
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))    

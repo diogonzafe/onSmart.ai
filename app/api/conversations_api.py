@@ -216,3 +216,37 @@ async def get_conversation_messages(
         "limit": limit,
         "offset": offset
     }
+
+# app/api/conversations_api.py - Adicionar endpoint
+
+@router.post("/{conversation_id}/resume")
+async def resume_conversation(
+    conversation_id: str,
+    message: Optional[str] = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retoma uma conversa interrompida."""
+    # Obter o serviço de conversas
+    from app.services.conversation_service import ConversationService
+    conversation_service = ConversationService(db)
+    
+    try:
+        # Verificar acesso à conversa
+        conversation = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.user_id == current_user.id
+        ).first()
+        
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversa não encontrada")
+        
+        # Retomar a conversa
+        result = await conversation_service.resume_conversation(
+            conversation_id=conversation_id,
+            message=message
+        )
+        
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

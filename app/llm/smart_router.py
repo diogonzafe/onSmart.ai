@@ -447,6 +447,8 @@ class SmartLLMRouter:
         
         logger.info("SmartLLMRouter inicializado")
     
+    # app/llm/smart_router.py - Modificar o método smart_generate
+
     async def smart_generate(
         self, 
         prompt: str,
@@ -456,23 +458,12 @@ class SmartLLMRouter:
         stream: bool = False,
         use_cache: bool = True,
         user_id: Optional[str] = None,
+        priority: int = 5,  # Novo parâmetro para prioridade
+        timeout: Optional[float] = None,  # Novo parâmetro para timeout
         **kwargs
     ) -> Union[str, AsyncGenerator[str, None]]:
         """
-        Gera texto usando o modelo mais adequado, com cache e limitação de taxa.
-        
-        Args:
-            prompt: Texto de entrada
-            model_id: ID do modelo preferido (opcional)
-            max_tokens: Número máximo de tokens
-            temperature: Controle de aleatoriedade
-            stream: Se True, retorna um gerador para streaming
-            use_cache: Se True, verifica e utiliza cache
-            user_id: ID do usuário (para limitação de taxa)
-            **kwargs: Argumentos adicionais para geração
-            
-        Returns:
-            Texto gerado ou gerador de streaming
+        Versão aprimorada com suporte a filas e prioridades.
         """
         # Se estiver em modo de streaming, não usar cache
         if stream:
@@ -492,7 +483,7 @@ class SmartLLMRouter:
             
             cached_result = await self.cache.get(cache_key)
             if cached_result:
-                logger.info(f"Resultado encontrado no cache para prompt: {prompt[:30]}...")
+                logger.info(f"Resultado encontrado no cache")
                 return cached_result
         
         # Verificar rate limit (se houver user_id)
@@ -530,83 +521,82 @@ class SmartLLMRouter:
             }
         )
         
-        # Iniciar o cronômetro
-        start_time = time.time()
-        success = False
-        error_msg = None
-        result = None
+        # Obter fila de LLM
+        from app.llm.queue_manager import get_llm_queue_manager
+        queue_manager = get_llm_queue_manager()
         
-        try:
-            # Obter o modelo selecionado
-            model = self.router.get_model(selected_model_id)
+        # Verificar se a fila está rodando
+        if not hasattr(queue_manager, 'running') or not queue_manager.running:
+            await queue_manager.start()
+        
+        # Definir função de geração
+        async def generation_task():
+            nonlocal cache_key
+            start_time = time.time()
+            success = False
+            error_msg = None
+            result = None
             
-            # Gerar texto
-            result = await model.generate(
-                prompt=prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stream=stream,
-                **kwargs
-            )
-            
-            # Se for streaming, não podemos armazenar em cache
-            if not stream:
-                success = True
+            try:
+                # Obter o modelo selecionado
+                model = self.router.get_model(selected_model_id)
                 
-                # Armazenar em cache se necessário
-                if use_cache and cache_key:
-                    await self.cache.set(cache_key, result, ttl=3600)  # 1 hora de TTL
-            else:
-                # Para streaming, precisamos de um wrapper para métricas
-                async def metrics_wrapper():
-                    nonlocal success
-                    chunks = []
-                    
-                    try:
-                        async for chunk in result:
-                            chunks.append(chunk)
-                            yield chunk
-                        success = True
-                    except Exception as e:
-                        nonlocal error_msg
-                        error_msg = str(e)
-                        raise
-                    finally:
-                        # Registrar resposta após o streaming
-                        combined_result = "".join(chunks)
-                        await self.metrics.record_response(
-                            request_id=request_id,
-                            success=success,
-                            latency=time.time() - start_time,
-                            tokens=int(len(combined_result.split()) * 1.3),  # Aproximação
-                            error=error_msg
-                        )
-                
-                return metrics_wrapper()
-            
-            return result
-            
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Erro na geração de texto: {error_msg}")
-            raise
-            
-        finally:
-            # Registrar resultado, exceto para streaming (que é tratado no wrapper)
-            if not stream:
-                # Estimar tokens para métricas (aproximado)
-                tokens = None
-                if isinstance(result, str):
-                    tokens = int(len(result.split()) * 1.3)
-                
-                await self.metrics.record_response(
-                    request_id=request_id,
-                    success=success,
-                    latency=time.time() - start_time,
-                    tokens=tokens,
-                    error=error_msg
+                # Gerar texto
+                result = await model.generate(
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=stream,
+                    **kwargs
                 )
-    
+                
+                # Se não for streaming, armazenar em cache
+                if not stream and result:
+                    success = True
+                    
+                    # Armazenar em cache se necessário
+                    if use_cache and cache_key:
+                        await self.cache.set(cache_key, result, ttl=3600)  # 1 hora de TTL
+                
+                return result
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Erro na geração de texto: {error_msg}")
+                raise
+                
+            finally:
+                # Registrar métricas
+                if not stream:
+                    # Estimar tokens para métricas (aproximado)
+                    tokens = None
+                    if isinstance(result, str):
+                        tokens = int(len(result.split()) * 1.3)
+                    
+                    await self.metrics.record_response(
+                        request_id=request_id,
+                        success=success,
+                        latency=time.time() - start_time,
+                        tokens=tokens,
+                        error=error_msg
+                    )
+        
+        # Para streaming, não podemos usar a fila (precisa retornar imediatamente)
+        if stream:
+            return await generation_task()
+        
+        # Adicionar à fila com prioridade
+        task_id = await queue_manager.enqueue(
+            coro=generation_task(),
+            priority=priority,
+            timeout=timeout,
+            model_id=selected_model_id,
+            task_type="generate"
+        )
+        
+        # Aguardar e retornar resultado da fila
+        return await generation_task()
+        
     async def smart_embed(
         self,
         text: Union[str, List[str]],

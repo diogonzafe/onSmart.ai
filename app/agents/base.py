@@ -14,11 +14,23 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# app/agents/base.py - Melhorar a classe AgentState
+
 class AgentState:
     """
-    Classe para gerenciar o estado interno de um agente durante sua execução.
-    Mantém informações de contexto, memória de curto prazo e status da execução.
+    Classe aprimorada para gerenciar o estado interno de um agente.
     """
+    
+    # Estados possíveis
+    INITIALIZING = "initializing"
+    READY = "ready"
+    PROCESSING = "processing"
+    WAITING_FOR_TOOLS = "waiting_for_tools"
+    WAITING_FOR_LLM = "waiting_for_llm"
+    WAITING_FOR_HUMAN = "waiting_for_human"
+    ERROR = "error"
+    COMPLETED = "completed"
+    TIMED_OUT = "timed_out"
     
     def __init__(self):
         self.context: Dict[str, Any] = {}
@@ -27,54 +39,57 @@ class AgentState:
             "recent_actions": [],
             "priorities": []
         }
-        self.status: str = "idle"  # idle, processing, waiting, error
+        self.status: str = self.READY
         self.error: Optional[str] = None
         self.last_update: datetime = datetime.utcnow()
+        self.state_history: List[Dict[str, Any]] = []
+        self.current_request_id: Optional[str] = None
+        self.timeout_seconds: float = 30.0  # Timeout padrão
+        self.heartbeat_interval: float = 5.0  # Intervalo de heartbeat
+        self.last_heartbeat: datetime = datetime.utcnow()
         
     def update_status(self, status: str, error: Optional[str] = None) -> None:
-        """Atualiza o status do agente e registra erro se houver."""
+        """Atualiza o status do agente e registra no histórico."""
+        old_status = self.status
         self.status = status
         self.error = error
         self.last_update = datetime.utcnow()
         
-    def add_fact(self, fact: str) -> None:
-        """Adiciona um fato à memória do agente."""
-        if fact not in self.memory["facts"]:
-            self.memory["facts"].append(fact)
-            # Limitar para os 20 fatos mais recentes
-            self.memory["facts"] = self.memory["facts"][-20:]
-    
-    def add_action(self, action: Dict[str, Any]) -> None:
-        """Registra uma ação realizada pelo agente."""
-        self.memory["recent_actions"].append({
-            "timestamp": datetime.utcnow().isoformat(),
-            "action": action
+        # Registrar transição no histórico
+        self.state_history.append({
+            "timestamp": self.last_update,
+            "from_status": old_status,
+            "to_status": status,
+            "error": error
         })
-        # Manter apenas as 10 ações mais recentes
-        self.memory["recent_actions"] = self.memory["recent_actions"][-10:]
-    
-    def set_priority(self, priority: str, value: int) -> None:
-        """Define uma prioridade para o agente."""
-        # Encontrar e atualizar se já existir
-        for p in self.memory["priorities"]:
-            if p["name"] == priority:
-                p["value"] = value
-                return
         
-        # Adicionar se não existir
-        self.memory["priorities"].append({
-            "name": priority,
-            "value": value
-        })
+        # Se status for algum tipo de "espera", agendar verificação de timeout
+        if status.startswith("waiting_"):
+            self._schedule_timeout_check()
     
-    def get_context(self) -> Dict[str, Any]:
-        """Retorna o contexto completo do agente para uso em prompts."""
-        return {
-            "context": self.context,
-            "memory": self.memory,
-            "status": self.status,
-            "last_update": self.last_update.isoformat()
-        }
+    def _schedule_timeout_check(self):
+        """Agenda uma verificação de timeout."""
+        asyncio.create_task(self._check_timeout())
+    
+    async def _check_timeout(self):
+        """Verifica se o agente está em timeout."""
+        await asyncio.sleep(self.timeout_seconds)
+        
+        # Se ainda estiver no mesmo estado de espera, considerar timeout
+        if self.status.startswith("waiting_") and (datetime.utcnow() - self.last_update).total_seconds() >= self.timeout_seconds:
+            self.update_status(self.TIMED_OUT, f"Timeout após {self.timeout_seconds}s em estado {self.status}")
+    
+    async def send_heartbeat(self):
+        """Envia um heartbeat para indicar que o agente está ativo."""
+        self.last_heartbeat = datetime.utcnow()
+    
+    def is_alive(self) -> bool:
+        """Verifica se o agente está ativo com base no heartbeat."""
+        return (datetime.utcnow() - self.last_heartbeat).total_seconds() < self.heartbeat_interval * 2
+    
+    def can_process_request(self) -> bool:
+        """Verifica se o agente pode processar uma nova solicitação."""
+        return self.status in [self.READY, self.COMPLETED, self.ERROR, self.TIMED_OUT]
 
 
 class BaseAgent(ABC):

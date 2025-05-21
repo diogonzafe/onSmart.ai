@@ -24,6 +24,9 @@ class TemplateService:
         """
         self.db = db
         self.template_manager = get_template_manager()
+
+
+        
     
     def create_template(self, 
                       name: str, 
@@ -80,6 +83,8 @@ class TemplateService:
         
         logger.info(f"Template criado: {name} ({template.id})")
         return template
+    
+    
     
     def update_template(self, 
                       template_id: str, 
@@ -332,3 +337,113 @@ def get_template_service(db: Session) -> TemplateService:
         _template_service_instance = TemplateService(db)
     
     return _template_service_instance
+
+# app/services/template_service.py - Adicionar métodos para versões e drafts
+
+def create_draft_from_template(self, template_id: str, user_id: str) -> Template:
+    """
+    Cria um rascunho (draft) a partir de um template existente.
+    
+    Args:
+        template_id: ID do template base
+        user_id: ID do usuário criando o draft
+        
+    Returns:
+        Novo template em modo rascunho
+    """
+    # Obter template original
+    original = self.get_template(template_id)
+    
+    # Criar nova versão como draft
+    draft = Template(
+        id=str(uuid.uuid4()),
+        name=f"{original.name} (Draft)",
+        description=original.description,
+        department=original.department,
+        is_public=False,  # Draft nunca é público
+        is_draft=True,
+        user_id=user_id,
+        organization_id=original.organization_id,
+        prompt_template=original.prompt_template,
+        tools_config=original.tools_config,
+        llm_config=original.llm_config,
+        version_number=original.version_number + 1,
+        parent_version_id=original.id,
+        tags=original.tags,
+        category=original.category
+    )
+    
+    # Salvar no banco de dados
+    self.db.add(draft)
+    self.db.commit()
+    self.db.refresh(draft)
+    
+    return draft
+
+def publish_draft(self, draft_id: str) -> Template:
+    """
+    Publica um rascunho, tornando-o a versão oficial.
+    
+    Args:
+        draft_id: ID do template em modo rascunho
+        
+    Returns:
+        Template publicado
+    """
+    # Obter o draft
+    draft = self.get_template(draft_id)
+    
+    if not draft.is_draft:
+        raise ValueError("Template já está publicado")
+    
+    # Verificar se há um parent
+    if draft.parent_version_id:
+        parent = self.get_template(draft.parent_version_id)
+        
+        # Se o parent não for draft, torná-lo obsoleto de alguma forma
+        # Neste exemplo, apenas marcamos draft como publicado
+        draft.is_draft = False
+        draft.name = parent.name  # Remover sufixo "Draft"
+        
+        self.db.commit()
+        self.db.refresh(draft)
+    
+    return draft
+
+def preview_template(self, template_data: Dict[str, Any], variables: Dict[str, Any]) -> str:
+    """
+    Gera um preview de um template sem salvá-lo.
+    
+    Args:
+        template_data: Dados do template
+        variables: Variáveis para renderização
+        
+    Returns:
+        Template renderizado
+    """
+    # Extrair dados
+    prompt_template = template_data.get("prompt_template", "")
+    
+    # Extrair variáveis do template
+    extracted_vars = self.template_manager._extract_variables(prompt_template)
+    
+    # Validar variáveis fornecidas
+    try:
+        self.template_manager._validate_variables(extracted_vars, variables)
+    except ValueError as e:
+        raise ValueError(f"Variáveis inválidas: {str(e)}")
+    
+    # Substituir variáveis no template
+    rendered_template = prompt_template
+    
+    for var_name, var_info in extracted_vars.items():
+        placeholder = f"{{{{{var_name}}}}}"
+        value = variables.get(var_name, var_info.get("default", ""))
+        
+        # Converter para string se necessário
+        if not isinstance(value, str):
+            value = str(value)
+        
+        rendered_template = rendered_template.replace(placeholder, value)
+    
+    return rendered_template
