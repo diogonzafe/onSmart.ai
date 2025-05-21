@@ -135,9 +135,11 @@ class SupervisorAgent(BaseAgent):
         
         return processed_response
     
+    # Atualizar o método _determine_department em app/agents/supervisor.py
+
     def _determine_department(self, 
-                             message: str, 
-                             processed_response: Dict[str, Any]) -> str:
+                            message: str, 
+                            processed_response: Dict[str, Any]) -> str:
         """
         Determina qual departamento é mais adequado para responder à mensagem.
         
@@ -157,9 +159,17 @@ class SupervisorAgent(BaseAgent):
         
         # Análise de palavras-chave se o LLM não especificou
         keywords = {
-            "marketing": ["marketing", "publicidade", "campanha", "redes sociais", "marca", "branding", "público-alvo"],
-            "sales": ["vendas", "cliente", "proposta", "negociação", "desconto", "preço", "cotação", "compra"],
-            "finance": ["financeiro", "orçamento", "custo", "pagamento", "fatura", "receita", "despesa", "contabilidade"]
+            "marketing": ["marketing", "publicidade", "campanha", "redes sociais", "marca", "branding", 
+                        "público-alvo", "divulgação", "comunicação", "mídia", "propaganda", "anúncio", 
+                        "conteúdo", "site", "blog", "engajamento", "alcance"],
+            
+            "sales": ["vendas", "cliente", "proposta", "negociação", "desconto", "preço", "cotação", 
+                    "compra", "vender", "oportunidade", "lead", "pipeline", "funil", "conversão", 
+                    "prospectar", "contrato", "fechar"],
+            
+            "finance": ["financeiro", "orçamento", "custo", "pagamento", "fatura", "receita", "despesa", 
+                    "contabilidade", "investimento", "ROI", "lucro", "prejuízo", "balanço", "fiscal", 
+                    "imposto", "tributo", "demonstrativo", "fluxo de caixa"]
         }
         
         # Contar ocorrências de palavras-chave
@@ -168,6 +178,28 @@ class SupervisorAgent(BaseAgent):
         for dept, words in keywords.items():
             for word in words:
                 scores[dept] += len(re.findall(rf'\b{word}\b', message.lower()))
+        
+        # Aplicar pesos contextuais baseados na frequência de termos relacionados
+        message_tokens = message.lower().split()
+        token_count = len(message_tokens)
+        
+        # Verificar contexto de ações
+        action_words = ["fazer", "criar", "preparar", "elaborar", "desenvolver", "implementar"]
+        has_action_context = any(word in message_tokens for word in action_words)
+        
+        # Verificar contexto de análise
+        analysis_words = ["analisar", "verificar", "avaliar", "estudar", "comparar", "medir"]
+        has_analysis_context = any(word in message_tokens for word in analysis_words)
+        
+        # Aplicar ajustes de contexto
+        if has_action_context:
+            # Ações tendem a favorecer marketing e vendas
+            scores["marketing"] *= 1.2
+            scores["sales"] *= 1.2
+        
+        if has_analysis_context:
+            # Análises tendem a favorecer finanças
+            scores["finance"] *= 1.5
         
         # Retornar o departamento com maior pontuação ou "custom" se empate/nenhum
         max_score = max(scores.values())

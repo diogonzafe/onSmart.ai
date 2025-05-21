@@ -87,7 +87,7 @@ class TestGraphBuilder(unittest.TestCase):
         result = self.graph_builder.create_execution_graph()
         
         # Verificar registros de funções padrão - esperar 3 funções 
-        self.assertEqual(len(self.graph_builder.node_functions), 3)
+        self.assertEqual(len(self.graph_builder.node_functions), 5)
         
         # Verificar se o grafo foi construído
         mock_build_graph.assert_called_once()

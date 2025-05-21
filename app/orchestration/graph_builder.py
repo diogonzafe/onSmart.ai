@@ -1,9 +1,11 @@
+# Atualizar em app/orchestration/graph_builder.py
+
 from typing import Dict, List, Any, Optional, Callable
 from langgraph.graph import StateGraph
 import langgraph.graph as lg
 
 from app.orchestration.state_manager import AgentState
-from app.orchestration.node_functions import supervisor_node, marketing_node, fallback_node
+from app.orchestration.node_functions import supervisor_node, marketing_node, sales_node, finance_node, fallback_node
 from app.orchestration.routing_logic import route_to_department, should_end
 
 class GraphBuilder:
@@ -45,10 +47,11 @@ class GraphBuilder:
         # Adicionar nós para cada tipo de agente/função
         graph.add_node("supervisor", supervisor_node)
         graph.add_node("marketing", marketing_node)
+        graph.add_node("sales", sales_node)          # Novo nó para vendas
+        graph.add_node("finance", finance_node)      # Novo nó para finanças
         graph.add_node("fallback", fallback_node)
         
         # Adicionar um nó de encerramento (end node) que apenas retorna o estado
-        # Este nó substituirá o None que estávamos usando
         graph.add_node("end", lambda state: state)
         
         # Adicionar arestas condicionais a partir do supervisor
@@ -57,15 +60,17 @@ class GraphBuilder:
             route_to_department,
             {
                 "marketing": "marketing",
+                "sales": "sales",           # Nova aresta para vendas
+                "finance": "finance",       # Nova aresta para finanças
                 "fallback": "fallback",
-                "complete": "end"  # Usar "end" em vez de None
+                "complete": "end"  
             }
         )
         
-        # Conectar o nó de marketing de volta ao supervisor
+        # Conectar os nós de departamento de volta ao supervisor
         graph.add_edge("marketing", "supervisor")
-        
-        # Conectar o nó de fallback de volta ao supervisor
+        graph.add_edge("sales", "supervisor")        # Nova conexão para vendas
+        graph.add_edge("finance", "supervisor")      # Nova conexão para finanças
         graph.add_edge("fallback", "supervisor")
         
         # Definir o ponto de entrada do grafo
@@ -85,6 +90,8 @@ class GraphBuilder:
         if not self.node_functions:
             self.register_node_function("supervisor", supervisor_node)
             self.register_node_function("marketing", marketing_node)
+            self.register_node_function("sales", sales_node)         # Novo registro
+            self.register_node_function("finance", finance_node)     # Novo registro
             self.register_node_function("fallback", fallback_node)
         
         # Construir e retornar o grafo

@@ -174,6 +174,170 @@ async def marketing_node(state: AgentState) -> AgentState:
     
     return state
 
+# Adicionar em app/orchestration/node_functions.py
+
+async def sales_node(state: AgentState) -> AgentState:
+    """
+    Nó de vendas que processa mensagens relacionadas a vendas.
+    
+    Args:
+        state: Estado atual do fluxo
+        
+    Returns:
+        Estado atualizado após processamento
+    """
+    logger.info(f"Executando nó de vendas para conversa {state.conversation_id}")
+    
+    # Registrar início do processamento
+    start_time = time.time()
+    
+    # Obter instância do agente de vendas
+    from app.services.agent_service import get_agent_service
+    agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
+    
+    sales_agents = await agent_service.list_agents(
+        user_id=state.user_id,
+        agent_type=AgentType.SALES,
+        is_active=True
+    )
+    
+    if not sales_agents:
+        logger.error(f"Nenhum agente de vendas encontrado para usuário {state.user_id}")
+        state.requires_fallback = True
+        return state
+    
+    sales_agent = create_agent(
+        agent_type=AgentType.SALES,
+        db=None,  # Será substituído na chamada real
+        agent_record=sales_agents[0]
+    )
+    
+    try:
+        # Processar a mensagem com o agente de vendas
+        response = await sales_agent.process_message(
+            conversation_id=state.conversation_id,
+            message=state.current_message
+        )
+        
+        # Criar resposta do agente usando AgentResponse
+        agent_response = AgentResponse(
+            agent_id=sales_agents[0].id,
+            content=response["message"]["content"],
+            actions=[
+                AgentAction(
+                    name=action.get("name", "unknown"),
+                    params=action.get("params", {}),
+                    agent_id=sales_agents[0].id
+                )
+                for action in response.get("actions", [])
+            ],
+            confidence=0.9,  # Valor exemplo, poderia ser calculado
+            metadata=response.get("metadata", {})
+        )
+        
+        # Atualizar o estado
+        state.add_response(agent_response)
+        state.previous_agent_id = state.current_agent_id
+        state.current_agent_id = sales_agents[0].id
+        
+        # Incrementar a tentativa
+        state.attempt_count += 1
+        
+        # Se atingiu o máximo de tentativas, concluir o fluxo
+        if state.attempt_count >= state.max_attempts:
+            state.is_complete = True
+            
+    except Exception as e:
+        logger.error(f"Erro ao processar mensagem com agente de vendas: {str(e)}")
+        state.requires_fallback = True
+    
+    # Registrar tempo de processamento
+    processing_time = time.time() - start_time
+    state.processing_times[sales_agents[0].id] = processing_time
+    
+    return state
+
+async def finance_node(state: AgentState) -> AgentState:
+    """
+    Nó de finanças que processa mensagens relacionadas a finanças.
+    
+    Args:
+        state: Estado atual do fluxo
+        
+    Returns:
+        Estado atualizado após processamento
+    """
+    logger.info(f"Executando nó de finanças para conversa {state.conversation_id}")
+    
+    # Registrar início do processamento
+    start_time = time.time()
+    
+    # Obter instância do agente de finanças
+    from app.services.agent_service import get_agent_service
+    agent_service = get_agent_service(None)  # Será substituído pelo db_session na chamada real
+    
+    finance_agents = await agent_service.list_agents(
+        user_id=state.user_id,
+        agent_type=AgentType.FINANCE,
+        is_active=True
+    )
+    
+    if not finance_agents:
+        logger.error(f"Nenhum agente de finanças encontrado para usuário {state.user_id}")
+        state.requires_fallback = True
+        return state
+    
+    finance_agent = create_agent(
+        agent_type=AgentType.FINANCE,
+        db=None,  # Será substituído na chamada real
+        agent_record=finance_agents[0]
+    )
+    
+    try:
+        # Processar a mensagem com o agente de finanças
+        response = await finance_agent.process_message(
+            conversation_id=state.conversation_id,
+            message=state.current_message
+        )
+        
+        # Criar resposta do agente usando AgentResponse
+        agent_response = AgentResponse(
+            agent_id=finance_agents[0].id,
+            content=response["message"]["content"],
+            actions=[
+                AgentAction(
+                    name=action.get("name", "unknown"),
+                    params=action.get("params", {}),
+                    agent_id=finance_agents[0].id
+                )
+                for action in response.get("actions", [])
+            ],
+            confidence=0.9,  # Valor exemplo, poderia ser calculado
+            metadata=response.get("metadata", {})
+        )
+        
+        # Atualizar o estado
+        state.add_response(agent_response)
+        state.previous_agent_id = state.current_agent_id
+        state.current_agent_id = finance_agents[0].id
+        
+        # Incrementar a tentativa
+        state.attempt_count += 1
+        
+        # Se atingiu o máximo de tentativas, concluir o fluxo
+        if state.attempt_count >= state.max_attempts:
+            state.is_complete = True
+            
+    except Exception as e:
+        logger.error(f"Erro ao processar mensagem com agente de finanças: {str(e)}")
+        state.requires_fallback = True
+    
+    # Registrar tempo de processamento
+    processing_time = time.time() - start_time
+    state.processing_times[finance_agents[0].id] = processing_time
+    
+    return state
+
 async def fallback_node(state: AgentState) -> AgentState:
     """
     Nó de fallback para quando os agentes especializados falham.

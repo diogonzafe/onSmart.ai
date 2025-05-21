@@ -1,7 +1,9 @@
+# Atualizar em app/orchestration/routing_logic.py
+
 from typing import Dict, List, Any, Optional, Literal, Union
 from app.orchestration.state_manager import AgentState
 
-def route_to_department(state: AgentState) -> Literal["marketing", "fallback", "complete"]:
+def route_to_department(state: AgentState) -> Literal["marketing", "sales", "finance", "fallback", "complete"]:
     """
     Decide para qual departamento encaminhar com base no estado atual.
     
@@ -26,9 +28,13 @@ def route_to_department(state: AgentState) -> Literal["marketing", "fallback", "
         
         selected_dept = metadata.get("selected_department")
         
-        # Se o departamento selecionado for marketing, rotear para o nó de marketing
+        # Rotear com base no departamento selecionado
         if selected_dept == "marketing":
             return "marketing"
+        elif selected_dept == "sales":
+            return "sales"
+        elif selected_dept == "finance":
+            return "finance"
     
     # Fallback como opção padrão
     return "fallback"
