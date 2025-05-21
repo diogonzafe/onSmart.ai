@@ -29,6 +29,7 @@ class Conversation(ConversationBase):
     
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 # Com mensagens incluídas
 class ConversationWithMessages(Conversation):

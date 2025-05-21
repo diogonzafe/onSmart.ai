@@ -6,14 +6,14 @@ import uuid
 from app.db.database import get_db
 from app.models.user import User
 from app.models.conversation import Conversation, ConversationStatus
-from app.models.message import Message
+from app.models.message import Message, MessageRole
 from app.core.security import get_current_active_user
 from app.schemas.conversation import ConversationCreate, ConversationUpdate, Conversation as ConversationSchema
 from app.schemas.message import Message as MessageSchema
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
-@router.get("/", response_model=Dict[str, Any])  # Corrigido o modelo de resposta
+@router.get("/", response_model=Dict[str, Any])
 async def list_conversations(
     status: Optional[ConversationStatus] = None,
     agent_id: Optional[str] = None,
@@ -36,8 +36,22 @@ async def list_conversations(
     total = query.count()
     conversations = query.order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
     
+    # Converter objetos SQLAlchemy para dicionários
+    items = []
+    for conv in conversations:
+        items.append({
+            "id": conv.id,
+            "title": conv.title,
+            "user_id": conv.user_id,
+            "agent_id": conv.agent_id,
+            "status": conv.status.value,
+            "metadata": conv.meta_data if hasattr(conv, 'meta_data') else (conv.metadata if hasattr(conv, 'metadata') else {}),
+            "created_at": conv.created_at,
+            "updated_at": conv.updated_at
+        })
+    
     return {
-        "items": conversations,
+        "items": items,
         "total": total,
         "limit": limit,
         "offset": offset
@@ -58,7 +72,17 @@ async def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
     
-    return conversation
+    # Converter para o esquema Pydantic
+    return ConversationSchema(
+        id=conversation.id,
+        title=conversation.title,
+        user_id=conversation.user_id,
+        agent_id=conversation.agent_id,
+        status=conversation.status,
+        metadata=conversation.meta_data if hasattr(conversation, 'meta_data') else (conversation.metadata if hasattr(conversation, 'metadata') else {}),
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at
+    )
 
 @router.post("/", response_model=ConversationSchema)
 async def create_conversation(
@@ -85,14 +109,25 @@ async def create_conversation(
         user_id=current_user.id,
         agent_id=conversation_data.agent_id,
         status=ConversationStatus.ACTIVE,
-        metadata=conversation_data.metadata
+        # Usa o nome correto do campo no modelo SQLAlchemy
+        meta_data=conversation_data.metadata
     )
     
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
     
-    return conversation
+    # Converter para o esquema Pydantic
+    return ConversationSchema(
+        id=conversation.id,
+        title=conversation.title,
+        user_id=conversation.user_id,
+        agent_id=conversation.agent_id,
+        status=conversation.status,
+        metadata=conversation.meta_data if hasattr(conversation, 'meta_data') else (conversation.metadata if hasattr(conversation, 'metadata') else {}),
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at
+    )
 
 @router.put("/{conversation_id}", response_model=ConversationSchema)
 async def update_conversation(
@@ -118,14 +153,28 @@ async def update_conversation(
         conversation.status = conversation_data.status
     
     if conversation_data.metadata is not None:
-        conversation.metadata = conversation_data.metadata
+        # Usa o nome correto do campo no modelo SQLAlchemy
+        if hasattr(conversation, 'meta_data'):
+            conversation.meta_data = conversation_data.metadata
+        else:
+            conversation.metadata = conversation_data.metadata
     
     db.commit()
     db.refresh(conversation)
     
-    return conversation
+    # Converter para o esquema Pydantic
+    return ConversationSchema(
+        id=conversation.id,
+        title=conversation.title,
+        user_id=conversation.user_id,
+        agent_id=conversation.agent_id,
+        status=conversation.status,
+        metadata=conversation.meta_data if hasattr(conversation, 'meta_data') else (conversation.metadata if hasattr(conversation, 'metadata') else {}),
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at
+    )
 
-@router.get("/{conversation_id}/messages", response_model=Dict[str, Any])  # Corrigido o modelo de resposta
+@router.get("/{conversation_id}/messages", response_model=Dict[str, Any])
 async def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(50, ge=1, le=100),
@@ -149,8 +198,20 @@ async def get_conversation_messages(
         Message.conversation_id == conversation_id
     ).order_by(Message.created_at).offset(offset).limit(limit).all()
     
+    # Converter objetos SQLAlchemy para dicionários
+    items = []
+    for msg in messages:
+        items.append({
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "role": msg.role.value,
+            "content": msg.content,
+            "metadata": msg.meta_data if hasattr(msg, 'meta_data') else (msg.metadata if hasattr(msg, 'metadata') else {}),
+            "created_at": msg.created_at
+        })
+    
     return {
-        "items": messages,
+        "items": items,
         "total": total,
         "limit": limit,
         "offset": offset
