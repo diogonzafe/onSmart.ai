@@ -11,10 +11,12 @@ from app.models.agent import AgentType
 
 logger = logging.getLogger(__name__)
 
+# app/orchestration/node_functions.py - Função supervisor_node corrigida
+
 async def supervisor_node(state: AgentState) -> AgentState:
     """
     Nó do supervisor que coordena o fluxo de trabalho.
-    CORRIGIDO para sempre gerar uma resposta adequada.
+    CORRIGIDO para funcionar sem agente supervisor, fazendo roteamento inteligente.
     
     Args:
         state: Estado atual do fluxo
@@ -44,88 +46,206 @@ async def supervisor_node(state: AgentState) -> AgentState:
             is_active=True
         )
         
-        if not supervisor_agents:
-            logger.error(f"Nenhum agente supervisor encontrado para usuário {state.user_id}")
+        if supervisor_agents:
+            # FLUXO COM SUPERVISOR: Usar agente supervisor existente
+            logger.info(f"Usando agente supervisor: {supervisor_agents[0].id}")
             
-            # CORREÇÃO: Gerar resposta explicativa em vez de apenas marcar como completo
-            fallback_response = AgentResponse(
-                agent_id="system_fallback",
-                content=f"Não há agentes supervisor configurados para seu usuário. Para usar o sistema de orquestração multi-agentes, você precisa primeiro criar um agente do tipo 'Supervisor' que coordenará os outros agentes. Enquanto isso, posso tentar responder diretamente à sua pergunta: {state.current_message}",
-                actions=[],
-                confidence=0.3,
-                metadata={"reason": "no_supervisor_agents", "suggestion": "create_supervisor_agent"}
+            supervisor_agent = create_agent(
+                agent_type=AgentType.SUPERVISOR,
+                db=state.db_session,
+                agent_record=supervisor_agents[0]
             )
             
-            # Adicionar resposta ao estado
-            state.add_response(fallback_response)
-            state.current_agent_id = "system_fallback"
-            state.is_complete = True
+            # Processar a mensagem com o supervisor
+            response = await supervisor_agent.process_message(
+                conversation_id=state.conversation_id,
+                message=state.current_message
+            )
             
-            # Registrar tempo de processamento
-            processing_time = time.time() - start_time
-            state.processing_times["system_fallback"] = processing_time
+            # Extrair metadados relevantes da resposta
+            selected_dept = response.get("metadata", {}).get("selected_department")
             
-            return state
+            # Criar resposta do agente usando a classe AgentResponse
+            agent_response = AgentResponse(
+                agent_id=supervisor_agents[0].id,
+                content=response["message"]["content"],
+                actions=[
+                    AgentAction(
+                        name="route_to_department",
+                        params={"department": selected_dept},
+                        agent_id=supervisor_agents[0].id
+                    )
+                ],
+                metadata=response.get("metadata", {})
+            )
+            
+            # Atualizar o estado
+            state.add_response(agent_response)
+            state.previous_agent_id = state.current_agent_id
+            state.current_agent_id = supervisor_agents[0].id
+            
+            # Se o supervisor não identificou um departamento, concluir o fluxo
+            if not selected_dept:
+                state.is_complete = True
+            else:
+                state.next_agent_id = selected_dept
         
-        supervisor_agent = create_agent(
-            agent_type=AgentType.SUPERVISOR,
-            db=state.db_session,
-            agent_record=supervisor_agents[0]
-        )
-        
-        # Processar a mensagem com o supervisor
-        response = await supervisor_agent.process_message(
-            conversation_id=state.conversation_id,
-            message=state.current_message
-        )
-        
-        # Extrair metadados relevantes da resposta
-        selected_dept = response.get("metadata", {}).get("selected_department")
-        
-        # Criar resposta do agente usando a classe AgentResponse
-        agent_response = AgentResponse(
-            agent_id=supervisor_agents[0].id,
-            content=response["message"]["content"],
-            actions=[
-                AgentAction(
-                    name="route_to_department",
-                    params={"department": selected_dept},
-                    agent_id=supervisor_agents[0].id
-                )
-            ],
-            metadata=response.get("metadata", {})
-        )
-        
-        # Atualizar o estado
-        state.add_response(agent_response)
-        state.previous_agent_id = state.current_agent_id
-        state.current_agent_id = supervisor_agents[0].id
-        
-        # Se o supervisor não identificou um departamento, concluir o fluxo
-        if not selected_dept:
-            state.is_complete = True
         else:
-            state.next_agent_id = selected_dept
+            # FLUXO SEM SUPERVISOR: Roteamento inteligente automático
+            logger.info("Nenhum agente supervisor encontrado, fazendo roteamento inteligente automático")
+            
+            # Analisar a mensagem para determinar o departamento mais adequado
+            department = _analyze_message_for_department(state.current_message)
+            
+            # Verificar se existe agente para o departamento identificado
+            department_agents = []
+            if department == "marketing":
+                department_agents = await agent_service.list_agents(
+                    user_id=state.user_id,
+                    agent_type=AgentType.MARKETING,
+                    is_active=True
+                )
+            elif department == "sales":
+                department_agents = await agent_service.list_agents(
+                    user_id=state.user_id,
+                    agent_type=AgentType.SALES,
+                    is_active=True
+                )
+            elif department == "finance":
+                department_agents = await agent_service.list_agents(
+                    user_id=state.user_id,
+                    agent_type=AgentType.FINANCE,
+                    is_active=True
+                )
+            
+            if department_agents:
+                # Criar resposta indicando o roteamento automático
+                auto_response = AgentResponse(
+                    agent_id="auto_supervisor",
+                    content=f"Analisando sua solicitação sobre '{state.current_message[:100]}...', identifiquei que se trata de uma questão relacionada a {department}. Vou encaminhar para o agente especializado apropriado.",
+                    actions=[
+                        AgentAction(
+                            name="route_to_department",
+                            params={"department": department},
+                            agent_id="auto_supervisor"
+                        )
+                    ],
+                    confidence=0.8,
+                    metadata={
+                        "selected_department": department,
+                        "routing_method": "automatic_analysis",
+                        "agent_available": True
+                    }
+                )
+                
+                # Atualizar o estado
+                state.add_response(auto_response)
+                state.current_agent_id = "auto_supervisor"
+                state.next_agent_id = department
+                
+                logger.info(f"Roteamento automático: {department} (agente disponível)")
+            
+            else:
+                # Tentar encontrar qualquer agente ativo do usuário
+                all_user_agents = []
+                for agent_type in [AgentType.MARKETING, AgentType.SALES, AgentType.FINANCE]:
+                    agents = await agent_service.list_agents(
+                        user_id=state.user_id,
+                        agent_type=agent_type,
+                        is_active=True
+                    )
+                    all_user_agents.extend(agents)
+                
+                if all_user_agents:
+                    # Há agentes, mas não do tipo identificado - usar o primeiro disponível
+                    fallback_agent = all_user_agents[0]
+                    fallback_dept = fallback_agent.type.value
+                    
+                    fallback_response = AgentResponse(
+                        agent_id="auto_supervisor_fallback",
+                        content=f"Não encontrei um agente especializado em {department}, mas tenho um agente de {fallback_dept} disponível que pode ajudar. Vou encaminhar sua solicitação.",
+                        actions=[
+                            AgentAction(
+                                name="route_to_department",
+                                params={"department": fallback_dept},
+                                agent_id="auto_supervisor_fallback"
+                            )
+                        ],
+                        confidence=0.6,
+                        metadata={
+                            "selected_department": fallback_dept,
+                            "routing_method": "fallback_to_available",
+                            "original_intent": department
+                        }
+                    )
+                    
+                    state.add_response(fallback_response)
+                    state.current_agent_id = "auto_supervisor_fallback"
+                    state.next_agent_id = fallback_dept
+                    
+                    logger.info(f"Fallback para agente disponível: {fallback_dept}")
+                
+                else:
+                    # Nenhum agente especializado disponível - resposta educativa
+                    no_agents_response = AgentResponse(
+                        agent_id="system_guidance",
+                        content=f"""Para sua pergunta sobre **{state.current_message[:100]}{'...' if len(state.current_message) > 100 else ''}**, eu posso oferecer algumas orientações gerais:
+
+{_generate_general_response(state.current_message, department)}
+
+**Para obter respostas mais específicas e personalizadas, recomendo criar agentes especializados:**
+
+🤖 **Agente de Marketing** - Para estratégias de comunicação, campanhas e análise de mídia
+💼 **Agente de Vendas** - Para processos comerciais, negociação e gestão de clientes  
+💰 **Agente Financeiro** - Para análises financeiras, orçamentos e controle de custos
+👨‍💼 **Agente Supervisor** - Para coordenar múltiplos departamentos em análises complexas
+
+Cada agente pode ser configurado com conhecimentos específicos da sua empresa e processos.""",
+                        actions=[],
+                        confidence=0.4,
+                        metadata={
+                            "reason": "no_agents_configured",
+                            "suggested_department": department,
+                            "suggestion": "create_specialized_agents",
+                            "routing_method": "educational_response"
+                        }
+                    )
+                    
+                    state.add_response(no_agents_response)
+                    state.current_agent_id = "system_guidance"
+                    state.is_complete = True
+                    
+                    logger.info("Nenhum agente disponível - resposta educativa fornecida")
         
         # Registrar tempo de processamento
         processing_time = time.time() - start_time
-        state.processing_times[supervisor_agents[0].id] = processing_time
+        agent_id = state.current_agent_id or "supervisor_unknown"
+        state.processing_times[agent_id] = processing_time
         
         return state
         
     except Exception as e:
         logger.error(f"Erro no nó supervisor: {str(e)}")
         
-        # CORREÇÃO: Gerar resposta de erro adequada
+        # Resposta de erro com orientação útil
         error_response = AgentResponse(
             agent_id="system_error",
-            content=f"Ocorreu um erro no processamento pelo agente supervisor: {str(e)}. Vou tentar responder diretamente: Para sua pergunta sobre '{state.current_message}', recomendo que entre em contato com nossa equipe de suporte para obter assistência personalizada.",
+            content=f"""Ocorreu um erro no processamento: {str(e)}
+
+Como alternativa, posso dar algumas orientações gerais para sua pergunta sobre **{state.current_message[:100]}{'...' if len(state.current_message) > 100 else ''}**:
+
+{_generate_general_response(state.current_message, "geral")}
+
+Para evitar este tipo de erro no futuro, verifique se você tem agentes configurados adequadamente.""",
             actions=[],
             confidence=0.1,
-            metadata={"error": str(e), "error_type": "supervisor_processing_error"}
+            metadata={
+                "error": str(e), 
+                "error_type": "supervisor_processing_error",
+                "suggestion": "check_agent_configuration"
+            }
         )
         
-        # Adicionar resposta de erro ao estado
         state.add_response(error_response)
         state.current_agent_id = "system_error"
         state.is_complete = True
@@ -135,6 +255,166 @@ async def supervisor_node(state: AgentState) -> AgentState:
         state.processing_times["system_error"] = processing_time
         
         return state
+
+
+def _analyze_message_for_department(message: str) -> str:
+    """
+    Analisa a mensagem para determinar qual departamento é mais adequado.
+    MELHORADO com análise mais sofisticada.
+    
+    Args:
+        message: Mensagem do usuário
+        
+    Returns:
+        Departamento mais adequado ('marketing', 'sales', 'finance', ou 'custom')
+    """
+    import re
+    
+    # Converter para lowercase para análise
+    message_lower = message.lower()
+    
+    # Padrões mais específicos e contextuais
+    marketing_patterns = [
+        r'\b(marketing|campanha|publicidade|propaganda|comunicação|mídia|social|redes sociais|conteúdo|branding|marca|engajamento|alcance|seo|adwords|facebook|instagram|linkedin|youtube|tiktok|influencer|viral|hashtag|post|stories|feed|bio|perfil|seguidores|likes|shares|impressões|cliques|ctr|cpm|cpc|roas|brand awareness|share of voice|sentiment|buzz|pr|assessoria|imprensa|release|cobertura|blog|artigo|editorial|newsletter|email marketing|landing page|lead magnet|funil|persona|jornada|customer journey|lifecycle|retention|churn)\b',
+        r'\b(estratégia.{0,20}(digital|online|comunicação|marca|conteúdo))\b',
+        r'\b(análise.{0,20}(mercado|concorrência|mídia|social|engajamento))\b',
+        r'\b(gestão.{0,20}(marca|comunidade|crise|reputação))\b'
+    ]
+    
+    sales_patterns = [
+        r'\b(vendas|venda|cliente|lead|prospect|pipeline|funil|conversão|oportunidade|negociação|proposta|orçamento|cotação|desconto|comissão|meta|quota|target|forecast|crm|salesforce|hubspot|follow.?up|cold.?call|warm.?lead|qualified|mql|sql|demo|trial|onboarding|upsell|cross.?sell|churn|lifetime.?value|ltv|cac|customer.?acquisition|retention|satisfaction|nps|survey|feedback|testimonial|referral|partnership|channel|distribuidor|revendedor|franquia|territory|account|key.?account|enterprise|smb|b2b|b2c|inside.?sales|field.?sales|telesales|e.?commerce|marketplace|checkout|cart|payment|subscription|recurring|revenue|arr|mrr)\b',
+        r'\b(processo.{0,20}(venda|comercial|negociação|fechamento))\b',
+        r'\b(estratégia.{0,20}(vendas|comercial|cliente|account))\b',
+        r'\b(gestão.{0,20}(cliente|relacionamento|pipeline|territory))\b'
+    ]
+    
+    finance_patterns = [
+        r'\b(financeiro|finanças|contábil|contabilidade|orçamento|budget|custo|despesa|receita|faturamento|cobrança|pagamento|fluxo.?caixa|cash.?flow|dre|demonstrativo|balanço|balancete|lucro|prejuízo|margem|ebitda|ebit|roe|roi|roa|payback|npv|vpl|irr|tir|capex|opex|working.?capital|debt|equity|alavancagem|liquidez|solvência|rentabilidade|lucratividade|break.?even|ponto.?equilibrio|análise.?vertical|análise.?horizontal|kpi|métrica|indicador|performance|budget|forecast|planejamento|controle|auditoria|compliance|fiscal|tributário|imposto|icms|ipi|pis|cofins|ir|csll|simples|lucro.?real|lucro.?presumido|depreciation|amortization|provision|accrual|accounts.?payable|accounts.?receivable|inventory|asset|liability|shareholder|stakeholder|dividend|distribution|valuation|m&a|merger|acquisition|ipo|funding|investment|venture.?capital|private.?equity)\b',
+        r'\b(análise.{0,20}(financeira|econômica|custo|benefício|viabilidade|investimento))\b',
+        r'\b(controle.{0,20}(interno|gestão|orçamentário|financeiro))\b',
+        r'\b(relatório.{0,20}(financeiro|gerencial|contábil))\b'
+    ]
+    
+    # Análise contextual - considerar combinações de termos
+    context_scores = {
+        "marketing": 0,
+        "sales": 0, 
+        "finance": 0
+    }
+    
+    # Pontuação por padrões diretos
+    for pattern in marketing_patterns:
+        matches = len(re.findall(pattern, message_lower))
+        context_scores["marketing"] += matches * 2
+    
+    for pattern in sales_patterns:
+        matches = len(re.findall(pattern, message_lower))
+        context_scores["sales"] += matches * 2
+    
+    for pattern in finance_patterns:
+        matches = len(re.findall(pattern, message_lower))
+        context_scores["finance"] += matches * 2
+    
+    # Análise de contexto multi-departamental
+    multi_dept_indicators = {
+        "estratégia integrada": ["marketing", "sales"],
+        "impacto nas vendas": ["marketing", "sales"],
+        "análise completa": ["marketing", "sales", "finance"],
+        "roi": ["marketing", "finance"],
+        "custo de aquisição": ["marketing", "sales", "finance"],
+        "lifetime value": ["sales", "finance"],
+        "budget marketing": ["marketing", "finance"],
+        "performance comercial": ["sales", "finance"]
+    }
+    
+    for indicator, depts in multi_dept_indicators.items():
+        if indicator in message_lower:
+            for dept in depts:
+                context_scores[dept] += 1
+    
+    # Análise de intent - palavras que indicam ação
+    action_words = ["preciso", "quero", "análise", "estratégia", "como", "quando", "onde", "qual", "melhor", "otimizar", "melhorar", "aumentar", "reduzir"]
+    has_action_intent = any(word in message_lower for word in action_words)
+    
+    if has_action_intent:
+        # Dar peso extra para departamentos identificados quando há intent de ação
+        max_score = max(context_scores.values())
+        if max_score > 0:
+            for dept, score in context_scores.items():
+                if score == max_score:
+                    context_scores[dept] += 1
+    
+    # Determinar departamento vencedor
+    max_score = max(context_scores.values())
+    if max_score > 0:
+        # Retornar o departamento com maior score
+        for dept, score in context_scores.items():
+            if score == max_score:
+                return dept
+    
+    # Fallback: análise de comprimento e complexidade
+    if len(message.split()) > 20:
+        return "marketing"  # Mensagens longas frequentemente são sobre estratégia/marketing
+    elif any(word in message_lower for word in ["vender", "comprar", "cliente", "preço"]):
+        return "sales"
+    elif any(word in message_lower for word in ["dinheiro", "custo", "valor", "pagar"]):
+        return "finance"
+    
+    # Default
+    return "marketing"
+
+
+def _generate_general_response(message: str, department: str) -> str:
+    """
+    Gera uma resposta geral útil baseada na mensagem e departamento identificado.
+    
+    Args:
+        message: Mensagem original do usuário
+        department: Departamento identificado
+        
+    Returns:
+        Resposta geral contextualizada
+    """
+    responses = {
+        "marketing": """**📱 Marketing Digital - Orientações Gerais:**
+
+• **Análise de Situação**: Mapeie o posicionamento atual da marca, concorrentes e público-alvo
+• **Estratégia Multi-Canal**: Integre social media, content marketing, SEO e paid media
+• **Métricas de Performance**: Acompanhe reach, engagement, conversions e ROI por canal
+• **Otimização Contínua**: Use A/B testing e análise de dados para refinar campanhas
+
+**Impacto em Vendas**: Marketing eficaz pode aumentar leads qualificados em 20-40%
+**Impacto Financeiro**: ROI bem executado pode gerar retorno de 3:1 a 6:1 em marketing digital""",
+
+        "sales": """**💼 Estratégia de Vendas - Diretrizes Fundamentais:**
+
+• **Pipeline Management**: Estruture funil com lead scoring e nurturing adequado
+• **Processo de Vendas**: Defina etapas claras de qualificação até fechamento
+• **CRM e Analytics**: Implemente sistema para tracking de oportunidades e performance
+• **Treinamento de Equipe**: Desenvolva técnicas de consultive selling e objection handling
+
+**Métricas Essenciais**: Conversion rate, ciclo de vendas, ticket médio e LTV
+**Integração Marketing**: Vendas + marketing alinhados podem aumentar receita em 38%""",
+
+        "finance": """**💰 Análise Financeira - Aspectos Fundamentais:**
+
+• **Controle de Budget**: Monitore ROI por canal e campaign performance
+• **Análise de Custos**: CAC (Customer Acquisition Cost) vs LTV (Lifetime Value)
+• **Cash Flow Impact**: Considere timing entre investimento em marketing e retorno em vendas
+• **KPIs Financeiros**: Margem de contribuição, payback period e ROAS por investimento
+
+**Recomendação**: Mantenha CAC < 30% do LTV e payback period < 12 meses""",
+
+        "geral": """**🎯 Análise Integrada - Visão Holística:**
+
+• **Marketing**: Foque em estratégias data-driven com métricas claras de ROI
+• **Vendas**: Desenvolva processo estruturado com CRM e pipeline management
+• **Finanças**: Monitore CAC, LTV e margens para sustentabilidade do crescimento
+
+**Integração é Chave**: Alinhamento entre os três departamentos pode aumentar a eficiência geral em até 35%"""
+    }
+    
+    return responses.get(department, responses["geral"])
 
 async def marketing_node(state: AgentState) -> AgentState:
     """
