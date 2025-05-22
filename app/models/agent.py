@@ -39,6 +39,8 @@ class Agent(Base):
     configuration = Column(JSON, nullable=False, default={})
     template_id = Column(String, ForeignKey("templates.id"), nullable=False)
     is_active = Column(Boolean, default=True)
+    # CORREÇÃO: Adicionar chave estrangeira para organization
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -47,6 +49,7 @@ class Agent(Base):
     template = relationship("Template", back_populates="agents")
     conversations = relationship("Conversation", back_populates="agent")
     tool_mappings = relationship("AgentToolMapping", back_populates="agent")
+    # CORREÇÃO: Relacionamento com Organization agora tem chave estrangeira
     organization = relationship("Organization", back_populates="agents")
     
     def __repr__(self):
@@ -64,6 +67,7 @@ class Agent(Base):
             "configuration": self.configuration,
             "template_id": self.template_id,
             "is_active": self.is_active,
+            "organization_id": self.organization_id,  # CORREÇÃO: Incluir no dict
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

@@ -1,13 +1,10 @@
-# app/tests/newtest/test_agent_state.py - Versão corrigida final
+# app/tests/newtest/test_agent_state.py - Versão corrigida
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime, timedelta
 
 from app.agents.base import AgentState
-from app.services.conversation_service import ConversationService
-from app.models.conversation import Conversation, ConversationStatus
-from app.models.message import Message, MessageRole
 
 class TestEnhancedAgentState:
     @pytest.fixture
@@ -63,42 +60,54 @@ class TestConversationService:
     @pytest.fixture
     def conversation_service(self):
         """Fixture para o serviço de conversas."""
+        # CORREÇÃO: Mock completo do banco de dados
         db = MagicMock()
-        agent_service = MagicMock()
         
-        service = ConversationService(db)
-        service.agent_service = agent_service
-        
-        return service
+        # CORREÇÃO: Usar patch para evitar problemas de importação circular
+        with patch('app.services.conversation_service.get_agent_service') as mock_agent_service_factory:
+            agent_service = MagicMock()
+            mock_agent_service_factory.return_value = agent_service
+            
+            # Importar aqui para evitar problemas de inicialização do SQLAlchemy
+            from app.services.conversation_service import ConversationService
+            service = ConversationService(db)
+            service.agent_service = agent_service
+            
+            return service
     
     @pytest.mark.asyncio
     async def test_resume_conversation(self, conversation_service):
         """Testa a retomada de uma conversa."""
-        # Mock para conversa
-        conversation = MagicMock(spec=Conversation)
+        # CORREÇÃO: Mock mais simples sem dependência de modelos SQLAlchemy
+        conversation = MagicMock()
         conversation.id = "conv-123"
         conversation.agent_id = "agent-123"
-        conversation.status = ConversationStatus.ACTIVE
+        conversation.status = "active"  # Usar string em vez de enum
         
-        # Mock para agente
         agent = MagicMock()
         agent.id = "agent-123"
         
-        # Mock para mensagens
-        message = MagicMock(spec=Message)
+        message = MagicMock()
         message.content = "Last message"
-        message.role = MessageRole.HUMAN
+        message.role = "human"  # Usar string em vez de enum
         
-        # Configurar mocks para o banco de dados
-        conversation_service.db.query.return_value.filter.return_value.first.side_effect = [
-            conversation,  # Para conversa
-            agent,         # Para agente
-        ]
-        conversation_service.db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            message        # Última mensagem
-        ]
+        # CORREÇÃO: Configurar mocks de forma mais robusta
+        def mock_query_side_effect(model):
+            query_mock = MagicMock()
+            if hasattr(model, '__name__') and model.__name__ == 'Conversation':
+                query_mock.filter.return_value.first.return_value = conversation
+            elif hasattr(model, '__name__') and model.__name__ == 'Agent':
+                query_mock.filter.return_value.first.return_value = agent
+            elif hasattr(model, '__name__') and model.__name__ == 'Message':
+                query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [message]
+            else:
+                # Para qualquer outro modelo, retornar mock genérico
+                query_mock.filter.return_value.first.return_value = None
+            return query_mock
         
-        # CORREÇÃO: Mock para process_message deve ser uma coroutine
+        conversation_service.db.query.side_effect = mock_query_side_effect
+        
+        # Mock para process_message deve ser uma coroutine
         async def mock_process_message(*args, **kwargs):
             return {
                 "agent_response": {"content": "Agent response"}
@@ -117,58 +126,53 @@ class TestConversationService:
         assert result["message_processed"] == True
         assert "response" in result
 
-# CORREÇÃO: Versão simplificada que funciona
 @pytest.mark.asyncio 
 async def test_detect_stuck_conversations():
     """Testa a detecção de conversas paralisadas."""
-    # Criar serviço mock
+    # CORREÇÃO: Mock mais simples do serviço
     db = MagicMock()
-    conversation_service = ConversationService(db)
     
-    # Mock para conversas
-    conversation1 = MagicMock(spec=Conversation)
-    conversation1.id = "conv-1"
-    conversation2 = MagicMock(spec=Conversation)
-    conversation2.id = "conv-2"
-    
-    # Mock para mensagens
-    message1 = MagicMock(spec=Message)
-    message1.role = MessageRole.HUMAN  # Última mensagem do usuário (stuck)
-    
-    message2 = MagicMock(spec=Message)
-    message2.role = MessageRole.AGENT  # Última mensagem do agente (não stuck)
-    
-    # SOLUÇÃO SIMPLIFICADA: Usar patch diretamente para cada query
-    with patch.object(conversation_service.db, 'query') as mock_query:
-        # Configurar retorno para query de conversas
-        conversations_result = MagicMock()
-        conversations_result.filter.return_value.all.return_value = [conversation1, conversation2]
+    # Mock das dependências para evitar problemas de importação
+    with patch('app.services.conversation_service.get_agent_service') as mock_agent_service:
+        mock_agent_service.return_value = MagicMock()
         
-        # Configurar retornos para queries de mensagens
-        message1_result = MagicMock()
-        message1_result.filter.return_value.order_by.return_value.first.return_value = message1
+        from app.services.conversation_service import ConversationService
+        conversation_service = ConversationService(db)
         
-        message2_result = MagicMock()
-        message2_result.filter.return_value.order_by.return_value.first.return_value = message2
+        # Mock para conversas
+        conversation1 = MagicMock()
+        conversation1.id = "conv-1"
+        conversation2 = MagicMock()
+        conversation2.id = "conv-2"
         
-        # Configurar side_effect para distinguir os tipos de query
-        def query_side_effect(model):
-            if model == Conversation:
-                return conversations_result
-            elif model == Message:
-                # Retornar diferentes resultados baseado em chamadas sequenciais
-                if not hasattr(query_side_effect, 'message_call_count'):
-                    query_side_effect.message_call_count = 0
-                
-                if query_side_effect.message_call_count == 0:
-                    query_side_effect.message_call_count += 1
-                    return message1_result  # Primeira conversa -> stuck
-                else:
-                    return message2_result  # Segunda conversa -> não stuck
+        # Mock para mensagens
+        message1 = MagicMock()
+        message1.role = "human"  # Última mensagem do usuário (stuck)
+        
+        message2 = MagicMock()
+        message2.role = "agent"  # Última mensagem do agente (não stuck)
+        
+        # CORREÇÃO: Configurar mocks de forma mais robusta
+        call_count = 0
+        def mock_query_side_effect(model):
+            nonlocal call_count
+            query_mock = MagicMock()
             
-            return MagicMock()
+            # Primeira chamada: buscar conversas
+            if call_count == 0:
+                query_mock.filter.return_value.all.return_value = [conversation1, conversation2]
+                call_count += 1
+            # Segunda chamada: primeira conversa
+            elif call_count == 1:
+                query_mock.filter.return_value.order_by.return_value.first.return_value = message1
+                call_count += 1
+            # Terceira chamada: segunda conversa
+            else:
+                query_mock.filter.return_value.order_by.return_value.first.return_value = message2
+            
+            return query_mock
         
-        mock_query.side_effect = query_side_effect
+        conversation_service.db.query.side_effect = mock_query_side_effect
         
         # Chamar o método
         result = conversation_service.detect_stuck_conversations(timeout_minutes=30)
