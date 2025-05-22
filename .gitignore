@@ -28,3 +28,6 @@ ENV/
 # IDE settings
 .vscode/
 .idea/
+
+# confs
+config.py

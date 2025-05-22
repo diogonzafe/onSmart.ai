@@ -134,11 +134,12 @@ class BackgroundJobQueue:
         logger.info("Background job queue parada")
     
     async def enqueue(self, 
-                   func: Callable[..., Awaitable[Any]], 
-                   *args, 
-                   timeout: Optional[float] = None,
-                   tenant_id: Optional[str] = None,
-                   **kwargs) -> str:
+               func: Callable[..., Awaitable[Any]], 
+               *args, 
+               timeout: Optional[float] = None,
+               tenant_id: Optional[str] = None,
+               auto_start: bool = True,  # Novo parâmetro
+               **kwargs) -> str:
         """
         Adiciona um job à fila.
         
@@ -147,6 +148,7 @@ class BackgroundJobQueue:
             *args: Argumentos posicionais
             timeout: Timeout em segundos
             tenant_id: ID do tenant (para isolamento)
+            auto_start: Se deve iniciar automaticamente a fila (padrão: True)
             **kwargs: Argumentos nomeados
             
         Returns:
@@ -155,8 +157,8 @@ class BackgroundJobQueue:
         job = Job(func, args, kwargs, timeout, tenant_id)
         self.jobs[job.id] = job
         
-        # Se a fila não estiver rodando, iniciar
-        if not self.running:
+        # Se a fila não estiver rodando e auto_start for True, iniciar
+        if not self.running and auto_start:
             await self.start()
         
         logger.info(f"Job {job.id} adicionado à fila")

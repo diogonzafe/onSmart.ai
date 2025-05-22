@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import List
+import os
 
 class Settings(BaseSettings):
     # App settings
@@ -26,8 +27,8 @@ class Settings(BaseSettings):
     LLM_SERVER_URL: str = "http://192.168.15.35:8000"
     LLM_SERVER_TIMEOUT: int = 1000
     
-    # Security
-    SECRET_KEY: str
+    # Security - Adicionando valor padrão para testes
+    SECRET_KEY: str = "development-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
