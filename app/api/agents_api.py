@@ -1,283 +1,117 @@
-# app/api/agents_api.py
-from fastapi import APIRouter, Depends, HTTPException, Body, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, List, Any, Optional
-import uuid
-
 from app.db.database import get_db
-from app.models.user import User
-from app.models.agent import Agent, AgentType
-from app.models.conversation import Conversation, ConversationStatus
-from app.models.template import Template
-from app.models.message import Message, MessageRole
+from app.models.agent import Agent
+from app.schemas.agent import AgentResponse, AgentUpdate
+from app.services.agent_service import get_agent_service, AgentService
 from app.core.security import get_current_active_user
-from app.llm.mcp_llm_service import get_mcp_llm_service
-from app.services.agent_service import get_agent_service
+from app.models.user import User
+from datetime import datetime
 
-router = APIRouter(prefix="/api/agents", tags=["agents"])
+router = APIRouter()
 
-@router.get("/")
-async def list_agents(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Lista todos os agentes do usuário atual."""
-    agents = db.query(Agent).filter(
-        Agent.user_id == current_user.id,
-        Agent.is_active == True
-    ).all()
-    
-    result = []
-    for agent in agents:
-        result.append({
-            "id": agent.id,
-            "name": agent.name,
-            "description": agent.description,
-            "type": agent.type.value,
-            "template_id": agent.template_id,
-            "configuration": agent.configuration
-        })
-    
-    return result
-
-@router.post("/conversation/{agent_id}")
-async def create_conversation(
+@router.patch("/agents/{agent_id}", response_model=AgentResponse)
+def patch_agent(
     agent_id: str,
-    title: str = Body(..., embed=True),
-    metadata: Optional[Dict[str, Any]] = Body(None, embed=True),
+    update_data: AgentUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Cria uma nova conversa com um agente.
-    Retorna o ID da conversa criada.
+    Atualiza parcialmente um agente específico.
     """
-    # Verificar se o agente existe e pertence ao usuário
-    agent = db.query(Agent).filter(
-        Agent.id == agent_id,
-        Agent.user_id == current_user.id,
-        Agent.is_active == True
-    ).first()
-    
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agente não encontrado")
-    
-    # Criar a conversa
-    conversation = Conversation(
-        id=str(uuid.uuid4()),
-        title=title,
-        user_id=current_user.id,
-        agent_id=agent_id,
-        status=ConversationStatus.ACTIVE,
-        metadata=metadata
-    )
-    
-    db.add(conversation)
-    db.commit()
-    db.refresh(conversation)
-    
-    return {"id": conversation.id, "title": conversation.title}
-
-@router.post("/message/{conversation_id}")
-async def send_message_to_agent(
-    conversation_id: str,
-    content: str = Body(..., embed=True),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    Envia uma mensagem para um agente em uma conversa.
-    Recebe a resposta do agente usando o protocolo MCP.
-    """
-    # Verificar se a conversa existe e pertence ao usuário
-    conversation = db.query(Conversation).filter(
-        Conversation.id == conversation_id,
-        Conversation.user_id == current_user.id,
-        Conversation.status == ConversationStatus.ACTIVE
-    ).first()
-    
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversa não encontrada ou inativa")
-    
-    # Obter o agente associado à conversa
-    agent = db.query(Agent).filter(
-        Agent.id == conversation.agent_id,
-        Agent.is_active == True
-    ).first()
-    
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agente não encontrado ou inativo")
-    
-    # Registrar a mensagem do usuário
-    user_message = Message(
-        id=str(uuid.uuid4()),
-        conversation_id=conversation_id,
-        role=MessageRole.HUMAN,
-        content=content
-    )
-    
-    db.add(user_message)
-    db.commit()
-    
-    # Gerar resposta do agente usando o serviço MCP
-    mcp_service = get_mcp_llm_service()
-    
     try:
-        response = await mcp_service.generate_agent_response(
-            db=db,
-            conversation_id=conversation_id,
-            agent=agent,
-            user_id=current_user.id
-        )
+        # Verificar se o agente existe e pertence ao usuário
+        agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.user_id == current_user.id
+        ).first()
         
-        return {
-            "user_message": {
-                "id": user_message.id,
-                "content": user_message.content
-            },
-            "agent_response": {
-                "id": response["message"]["id"],
-                "content": response["message"]["content"],
-                "actions": response["actions"]
-            }
-        }
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agente não encontrado"
+            )
         
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Erro ao processar resposta: {str(e)}")
-    
-    # Adicionar ao final do arquivo app/api/agents_api.py
-
-@router.post("/create")  # Adiciona um endpoint alternativo para criação de agente
-async def create_agent_endpoint(
-    name: str = Body(...),
-    description: str = Body(...),
-    agent_type: AgentType = Body(...),
-    template_id: str = Body(...),
-    configuration: Dict[str, Any] = Body({}),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    Cria um novo agente.
-    Endpoint alternativo para o método POST / que está dando erro 405.
-    """
-    # Obter o serviço de agentes
-    from app.services.agent_service import get_agent_service
-    agent_service = get_agent_service(db)
-    
-    try:
-        agent = agent_service.create_agent(
-            user_id=current_user.id,
-            name=name,
-            description=description,
-            agent_type=agent_type,
-            template_id=template_id,
-            configuration=configuration
-        )
+        # Obter o serviço de agentes
+        agent_service = get_agent_service(db)
         
-        return {
-            "id": agent.id,
-            "name": agent.name,
-            "type": agent.type.value,
-            "template_id": agent.template_id,
-            "message": "Agente criado com sucesso"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Converter os dados de atualização para os parâmetros esperados pelo service
+        update_dict = update_data.dict(exclude_unset=True)
         
-@router.get("/supervisor")
-async def get_supervisor_agent(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Retorna o primeiro agente supervisor disponível para o usuário."""
-    supervisor = db.query(Agent).filter(
-        Agent.user_id == current_user.id,
-        Agent.type == AgentType.SUPERVISOR,
-        Agent.is_active == True
-    ).first()
-    
-    if not supervisor:
-        raise HTTPException(status_code=404, detail="Nenhum agente supervisor encontrado")
-    
-    return {
-        "id": supervisor.id,
-        "name": supervisor.name,
-        "type": supervisor.type.value
-    }
-
-# app/api/agents_api.py - Adicionar método PATCH
-
-@router.patch("/{agent_id}")
-async def patch_agent(
-    agent_id: str,
-    update_data: Dict[str, Any] = Body(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Atualiza parcialmente um agente existente."""
-    # Verificar se o agente existe e pertence ao usuário
-    agent = db.query(Agent).filter(
-        Agent.id == agent_id,
-        Agent.user_id == current_user.id
-    ).first()
-    
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agente não encontrado")
-    
-    # Atualizar apenas os campos fornecidos
-    from app.services.agent_service import get_agent_service
-    agent_service = get_agent_service(db)
-    
-    try:
+        # Atualizar usando o service
         updated_agent = agent_service.update_agent(
             agent_id=agent_id,
-            name=update_data.get("name"),
-            description=update_data.get("description"),
-            is_active=update_data.get("is_active"),
-            configuration=update_data.get("configuration")
+            name=update_dict.get('name'),
+            description=update_dict.get('description'),
+            is_active=update_dict.get('is_active'),
+            configuration=update_dict.get('configuration')
         )
         
         return updated_agent
+        
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Erros do service (como agente não encontrado)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno do servidor: {str(e)}"
+        )
 
-# app/api/templates_api.py - Adicionar método PATCH
-
-@router.patch("/{template_id}")
-async def patch_template(
-    template_id: str,
-    update_data: Dict[str, Any] = Body(...),
+@router.put("/agents/{agent_id}", response_model=AgentResponse)
+def update_agent(
+    agent_id: str,
+    agent_update: AgentUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Atualiza parcialmente um template existente."""
-    # Verificar se o template existe e pertence ao usuário
-    template = db.query(Template).filter(
-        Template.id == template_id,
-        Template.user_id == current_user.id
-    ).first()
-    
-    if not template:
-        raise HTTPException(status_code=404, detail="Template não encontrado")
-    
-    # Atualizar apenas os campos fornecidos
-    from app.services.template_service import get_template_service
-    template_service = get_template_service(db)
-    
+    """
+    Atualiza completamente um agente específico.
+    """
     try:
-        updated_template = template_service.update_template(
-            template_id=template_id,
-            name=update_data.get("name"),
-            description=update_data.get("description"),
-            department=update_data.get("department"),
-            is_public=update_data.get("is_public"),
-            prompt_template=update_data.get("prompt_template"),
-            tools_config=update_data.get("tools_config"),
-            llm_config=update_data.get("llm_config")
+        # Verificar se o agente existe e pertence ao usuário
+        agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.user_id == current_user.id
+        ).first()
+        
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agente não encontrado"
+            )
+        
+        # Obter o serviço de agentes
+        agent_service = get_agent_service(db)
+        
+        # Converter para dict e usar o serviço
+        update_data = agent_update.dict(exclude_unset=True)
+        
+        updated_agent = agent_service.update_agent(
+            agent_id=agent_id,
+            name=update_data.get('name'),
+            description=update_data.get('description'),
+            is_active=update_data.get('is_active'),
+            configuration=update_data.get('configuration')
         )
         
-        return updated_template
+        return updated_agent
+        
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno do servidor: {str(e)}"
+        )

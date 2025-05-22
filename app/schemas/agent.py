@@ -90,8 +90,8 @@ class AgentBatchUpdate(BaseModel):
             }
         }
 
-# Para respostas de agentes
-class Agent(AgentBase):
+# Para respostas de agentes (RENOMEADO PARA AgentResponse)
+class AgentResponse(AgentBase):
     id: str
     user_id: str
     template_id: str
@@ -111,8 +111,11 @@ class Agent(AgentBase):
         # Permitir enums serem serializados como valores
         use_enum_values = True
 
+# Alias para manter compatibilidade com código existente
+Agent = AgentResponse
+
 # Modelo de agente com ferramentas incluídas
-class AgentWithTools(Agent):
+class AgentWithTools(AgentResponse):
     tools: List[Any] = []
     
     class Config:

@@ -65,6 +65,11 @@ app.include_router(llm_api.router)
 app.include_router(mcp_api.router)
 app.include_router(agents_api.router)
 app.include_router(orchestration_api.router)
+app.include_router(
+    agents_api.router,
+    prefix="/api",
+    tags=["agents"]
+)
 
 # Criar e incluir os novos routers
 templates_router = APIRouter(prefix="/api/templates", tags=["templates"])

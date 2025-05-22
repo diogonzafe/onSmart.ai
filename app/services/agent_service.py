@@ -159,6 +159,27 @@ class AgentService:
         logger.info(f"Agente atualizado: {agent.name} ({agent_id})")
         return agent
     
+    # Adicione este método ao seu AgentService como alternativa mais flexível
+    def update_agent_dict(self, agent_id: str, update_data: Dict[str, Any]) -> Agent:
+        """
+        Atualiza um agente usando um dicionário de dados.
+        Versão mais flexível do update_agent.
+        
+        Args:
+            agent_id: ID do agente a ser atualizado
+            update_data: Dicionário com os campos a serem atualizados
+            
+        Returns:
+            Agente atualizado
+        """
+        return self.update_agent(
+            agent_id=agent_id,
+            name=update_data.get('name'),
+            description=update_data.get('description'),
+            is_active=update_data.get('is_active'),
+            configuration=update_data.get('configuration')
+        )
+    
     def get_agent(self, agent_id: str) -> Agent:
         """
         Obtém um agente pelo ID.
