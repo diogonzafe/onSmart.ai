@@ -83,48 +83,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# CORREÇÃO: Include routers sem duplicação
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(llm_api.router)
 app.include_router(mcp_api.router)
-app.include_router(agents_api.router)
+app.include_router(agents_api.router)  # Agora incluindo apenas uma vez
 app.include_router(orchestration_api.router)
-app.include_router(
-    agents_api.router,
-    prefix="/api",
-    tags=["agents"]
-)
 
-# Criar e incluir os novos routers
-templates_router = APIRouter(prefix="/api/templates", tags=["templates"])
-conversations_router = APIRouter(prefix="/api/conversations", tags=["conversations"])
-metrics_router = APIRouter(prefix="/api/metrics", tags=["metrics"])
-
-# Importar e incluir os routers (se os arquivos existirem)
+# Importar e incluir os demais routers
 try:
     from app.api import templates_api
     app.include_router(templates_api.router)
     logger.info("Router templates_api incluído com sucesso")
 except ImportError:
-    app.include_router(templates_router)
-    logger.warning("Módulo templates_api não encontrado. Usando router padrão.")
+    logger.warning("Módulo templates_api não encontrado.")
 
 try:
     from app.api import conversations_api
     app.include_router(conversations_api.router)
     logger.info("Router conversations_api incluído com sucesso")
 except ImportError:
-    app.include_router(conversations_router)
-    logger.warning("Módulo conversations_api não encontrado. Usando router padrão.")
+    logger.warning("Módulo conversations_api não encontrado.")
 
 try:
     from app.api import metrics_api
     app.include_router(metrics_api.router)
     logger.info("Router metrics_api incluído com sucesso")
 except ImportError:
-    app.include_router(metrics_router)
-    logger.warning("Módulo metrics_api não encontrado. Usando router padrão.")
+    logger.warning("Módulo metrics_api não encontrado.")
+
+try:
+    from app.api import batch_api
+    app.include_router(batch_api.router)
+    logger.info("Router batch_api incluído com sucesso")
+except ImportError:
+    logger.warning("Módulo batch_api não encontrado.")
+
+try:
+    from app.api import test_api
+    app.include_router(test_api.router)
+    logger.info("Router test_api incluído com sucesso")
+except ImportError:
+    logger.warning("Módulo test_api não encontrado.")
 
 @app.get("/")
 async def root():
@@ -143,12 +144,34 @@ async def list_endpoints():
     """Lista todos os endpoints registrados para depuração."""
     routes = []
     for route in app.routes:
-        routes.append({
+        route_info = {
             "path": route.path,
             "name": route.name,
-            "methods": list(route.methods) if hasattr(route, "methods") else None
-        })
-    return {"routes": routes}
+        }
+        
+        if hasattr(route, "methods"):
+            route_info["methods"] = list(route.methods)
+        
+        routes.append(route_info)
+    
+    # Agrupar por prefixo para melhor organização
+    grouped_routes = {}
+    for route in routes:
+        path = route["path"]
+        if path.startswith("/api/"):
+            prefix = path.split("/")[2] if len(path.split("/")) > 2 else "root"
+        else:
+            prefix = "root"
+        
+        if prefix not in grouped_routes:
+            grouped_routes[prefix] = []
+        
+        grouped_routes[prefix].append(route)
+    
+    return {
+        "total_routes": len(routes),
+        "grouped_routes": grouped_routes
+    }
 
 # Evento de inicialização da aplicação
 @app.on_event("startup")

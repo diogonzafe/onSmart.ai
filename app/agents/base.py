@@ -1,6 +1,6 @@
 # app/agents/base.py
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, AsyncGenerator  # Adicione AsyncGenerator aqui
 import logging
 import uuid
 import asyncio
@@ -37,7 +37,7 @@ class AgentState:
         self.memory: Dict[str, Any] = {
             "facts": [],
             "recent_actions": [],
-            "priorities": []
+            "priorities": {}
         }
         self.status: str = self.READY
         self.error: Optional[str] = None
@@ -90,6 +90,42 @@ class AgentState:
     def can_process_request(self) -> bool:
         """Verifica se o agente pode processar uma nova solicitação."""
         return self.status in [self.READY, self.COMPLETED, self.ERROR, self.TIMED_OUT]
+    
+    # CORREÇÃO: Adicionar métodos que faltam
+    def set_priority(self, key: str, value: int) -> None:
+        """Define uma prioridade."""
+        self.memory["priorities"][key] = value
+    
+    def get_priority(self, key: str, default: int = 5) -> int:
+        """Obtém uma prioridade."""
+        return self.memory["priorities"].get(key, default)
+    
+    def add_fact(self, fact: str) -> None:
+        """Adiciona um fato à memória."""
+        if fact and fact not in self.memory["facts"]:
+            self.memory["facts"].append(fact)
+    
+    def add_action(self, action: Dict[str, Any]) -> None:
+        """Adiciona uma ação ao histórico."""
+        self.memory["recent_actions"].append({
+            **action,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+        # Manter apenas as últimas 10 ações
+        if len(self.memory["recent_actions"]) > 10:
+            self.memory["recent_actions"] = self.memory["recent_actions"][-10:]
+    
+    def get_context(self) -> Dict[str, Any]:
+        """Obtém o contexto atual do estado."""
+        return {
+            "status": self.status,
+            "memory": self.memory,
+            "last_update": self.last_update.isoformat(),
+            "is_alive": self.is_alive(),
+            "can_process": self.can_process_request(),
+            "error": self.error
+        }
 
 
 class BaseAgent(ABC):
@@ -290,7 +326,7 @@ class BaseAgent(ABC):
             conversation_id=conversation_id,
             role=MessageRole.AGENT,
             content=processed_response["filtered_content"],
-            metadata={
+            meta_data={
                 "actions": processed_response["actions"],
                 "validation": processed_response["validation"]
             }
