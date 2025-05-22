@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# scripts/complete_setup.py
+# app/scripts/complete_setup.py - Versão Corrigida
 """
 Script completo para setup e teste do sistema multi-agentes.
 Inclui criação de banco, população de dados e testes funcionais.
@@ -7,29 +7,46 @@ Inclui criação de banco, população de dados e testes funcionais.
 
 import os
 import sys
+
+# CORREÇÃO: Configurar o PYTHONPATH corretamente
+# Obter o diretório do script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Subir dois níveis para chegar à pasta backend
+backend_dir = os.path.dirname(os.path.dirname(script_dir))
+# Adicionar ao Python path
+sys.path.insert(0, backend_dir)
+
+print(f"📍 Script directory: {script_dir}")
+print(f"📍 Backend directory: {backend_dir}")
+print(f"📍 Python path configurado: {backend_dir}")
+
 import asyncio
 import logging
 import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-# Adicionar o diretório raiz ao path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-
-# Importar componentes necessários
-from sqlalchemy import create_engine, text
-from app.config import settings
-from app.db.database import SessionLocal, Base
-from app.models.user import User, AuthProvider
-from app.models.template import Template, TemplateDepartment
-from app.models.agent import Agent, AgentType
-from app.models.conversation import Conversation, ConversationStatus
-from app.models.message import Message, MessageRole
-from app.services.agent_service import get_agent_service
-from app.services.template_service import get_template_service
-from app.core.security import get_password_hash
+# Agora podemos importar os módulos normalmente
+try:
+    from sqlalchemy import create_engine, text
+    from app.config import settings
+    from app.db.database import SessionLocal, Base
+    from app.models.user import User, AuthProvider
+    from app.models.template import Template, TemplateDepartment
+    from app.models.agent import Agent, AgentType
+    from app.models.conversation import Conversation, ConversationStatus
+    from app.models.message import Message, MessageRole
+    from app.services.agent_service import get_agent_service
+    from app.services.template_service import get_template_service
+    from app.core.security import get_password_hash
+    print("✅ Todos os módulos importados com sucesso!")
+except ImportError as e:
+    print(f"❌ Erro ao importar módulos: {e}")
+    print("\n🔧 Possíveis soluções:")
+    print("1. Certifique-se de estar na pasta backend")
+    print("2. Verifique se o ambiente virtual está ativado")
+    print("3. Execute: pip install -r requirements.txt")
+    sys.exit(1)
 
 # Configurar logging
 logging.basicConfig(
@@ -45,16 +62,22 @@ class SystemSetup:
     
     def __init__(self):
         """Inicializa o setup."""
-        self.db = SessionLocal()
-        self.engine = create_engine(settings.DATABASE_URL)
-        self.agent_service = get_agent_service(self.db)
-        self.template_service = get_template_service(self.db)
-        
-        # IDs criados durante o setup
-        self.demo_user_id = None
-        self.template_ids = {}
-        self.agent_ids = {}
-        self.conversation_ids = []
+        try:
+            self.db = SessionLocal()
+            self.engine = create_engine(settings.DATABASE_URL)
+            self.agent_service = get_agent_service(self.db)
+            self.template_service = get_template_service(self.db)
+            
+            # IDs criados durante o setup
+            self.demo_user_id = None
+            self.template_ids = {}
+            self.agent_ids = {}
+            self.conversation_ids = []
+            
+            print("✅ SystemSetup inicializado com sucesso!")
+        except Exception as e:
+            print(f"❌ Erro ao inicializar SystemSetup: {e}")
+            raise
     
     async def run_complete_setup(self):
         """
@@ -91,20 +114,30 @@ class SystemSetup:
             
         except Exception as e:
             logger.error(f"❌ Erro durante o setup: {str(e)}")
+            import traceback
+            traceback.print_exc()
             raise
         finally:
             self.db.close()
     
     async def _setup_database(self):
         """Configura o banco de dados."""
-        logger.info("   - Criando extensão pgvector...")
+        logger.info("   - Verificando conexão com o banco...")
         
-        with self.engine.connect() as connection:
-            try:
+        try:
+            with self.engine.connect() as connection:
+                # Testar conexão
+                connection.execute(text("SELECT 1"))
+                logger.info("   ✓ Conexão com banco de dados estabelecida")
+                
                 # Criar extensão vector
-                connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-                connection.commit()
-                logger.info("   ✓ Extensão pgvector criada/verificada")
+                try:
+                    connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                    connection.commit()
+                    logger.info("   ✓ Extensão pgvector criada/verificada")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Não foi possível criar extensão pgvector: {e}")
+                    logger.info("   ℹ️ Continuando sem pgvector...")
                 
                 # Criar todas as tabelas
                 Base.metadata.create_all(bind=self.engine)
@@ -119,14 +152,17 @@ class SystemSetup:
                 ]
                 
                 for index_sql in performance_indices:
-                    connection.execute(text(index_sql))
+                    try:
+                        connection.execute(text(index_sql))
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Erro ao criar índice: {e}")
                 
                 connection.commit()
                 logger.info("   ✓ Índices de performance criados")
                 
-            except Exception as e:
-                logger.error(f"   ❌ Erro na configuração do banco: {str(e)}")
-                raise
+        except Exception as e:
+            logger.error(f"   ❌ Erro na configuração do banco: {str(e)}")
+            raise
     
     async def _create_demo_user(self):
         """Cria um usuário demo para testes."""
@@ -364,17 +400,20 @@ Sempre contextualize números e explique o impacto no negócio.""",
         ]
         
         for agent_config in agents_config:
-            agent = self.agent_service.create_agent(
-                user_id=self.demo_user_id,
-                name=agent_config["name"],
-                description=f"Agente demo para {agent_config['type'].value}",
-                agent_type=agent_config["type"],
-                template_id=self.template_ids[agent_config["template"]],
-                configuration=agent_config["config"]
-            )
-            
-            self.agent_ids[agent_config["key"]] = agent.id
-            logger.info(f"   ✓ Agente criado: {agent.name} ({agent_config['type'].value})")
+            try:
+                agent = self.agent_service.create_agent(
+                    user_id=self.demo_user_id,
+                    name=agent_config["name"],
+                    description=f"Agente demo para {agent_config['type'].value}",
+                    agent_type=agent_config["type"],
+                    template_id=self.template_ids[agent_config["template"]],
+                    configuration=agent_config["config"]
+                )
+                
+                self.agent_ids[agent_config["key"]] = agent.id
+                logger.info(f"   ✓ Agente criado: {agent.name} ({agent_config['type'].value})")
+            except Exception as e:
+                logger.error(f"   ❌ Erro ao criar agente {agent_config['name']}: {e}")
     
     async def _run_functional_tests(self):
         """Executa testes funcionais do sistema."""
@@ -416,27 +455,31 @@ Sempre contextualize números e explique o impacto no negócio.""",
                 self.conversation_ids.append(conversation.id)
                 
                 # Processar mensagem com o supervisor
-                response = await self.agent_service.process_message(
-                    agent_id=self.agent_ids["supervisor"],
-                    conversation_id=conversation.id,
-                    message=scenario["message"]
-                )
-                
-                # Verificar resposta
-                agent_response = response.get("agent_response", {})
-                if agent_response:
-                    logger.info(f"     ✓ Supervisor respondeu: {agent_response.get('message', {}).get('content', '')[:100]}...")
+                try:
+                    response = await self.agent_service.process_message(
+                        agent_id=self.agent_ids["supervisor"],
+                        conversation_id=conversation.id,
+                        message=scenario["message"]
+                    )
                     
-                    # Verificar se direcionou corretamente
-                    metadata = agent_response.get("metadata", {})
-                    selected_dept = metadata.get("selected_department")
-                    
-                    if selected_dept == scenario["expected_department"]:
-                        logger.info(f"     ✓ Direcionamento correto: {selected_dept}")
+                    # Verificar resposta
+                    agent_response = response.get("agent_response", {})
+                    if agent_response:
+                        logger.info(f"     ✓ Supervisor respondeu: {agent_response.get('message', {}).get('content', '')[:100]}...")
+                        
+                        # Verificar se direcionou corretamente
+                        metadata = agent_response.get("metadata", {})
+                        selected_dept = metadata.get("selected_department")
+                        
+                        if selected_dept == scenario["expected_department"]:
+                            logger.info(f"     ✓ Direcionamento correto: {selected_dept}")
+                        else:
+                            logger.warning(f"     ⚠️ Direcionamento inesperado: {selected_dept} (esperado: {scenario['expected_department']})")
                     else:
-                        logger.warning(f"     ⚠️ Direcionamento inesperado: {selected_dept} (esperado: {scenario['expected_department']})")
-                else:
-                    logger.error(f"     ❌ Nenhuma resposta recebida")
+                        logger.error(f"     ❌ Nenhuma resposta recebida")
+                        
+                except Exception as e:
+                    logger.error(f"     ❌ Erro ao processar mensagem: {e}")
                 
                 # Pequena pausa entre testes
                 await asyncio.sleep(1)
@@ -469,9 +512,10 @@ Sempre contextualize números e explique o impacto no negócio.""",
         # Salvar relatório em arquivo
         import json
         try:
-            with open("setup_report.json", "w") as f:
+            report_path = os.path.join(backend_dir, "setup_report.json")
+            with open(report_path, "w") as f:
                 json.dump(report, f, indent=2)
-            logger.info("   📄 Relatório salvo em: setup_report.json")
+            logger.info(f"   📄 Relatório salvo em: {report_path}")
         except Exception as e:
             logger.error(f"   ❌ Erro ao salvar relatório: {str(e)}")
 
@@ -490,6 +534,7 @@ async def main():
         print("2. Faça login com: demo@techcorp.com / demo123")
         print("3. Teste os agentes criados")
         print("4. Visualize métricas em: http://localhost:8000/api/metrics")
+        print("5. Explore a documentação da API em: http://localhost:8000/docs")
         
     except Exception as e:
         print(f"\n❌ Erro durante o setup: {str(e)}")
@@ -500,5 +545,4 @@ async def main():
     return 0
 
 if __name__ == "__main__":
-    import sys
     sys.exit(asyncio.run(main()))

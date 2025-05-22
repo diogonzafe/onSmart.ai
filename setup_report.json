@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-05-22T15:15:00.548307",
+  "demo_user_id": "8a264012-c4a4-4d0c-8dea-1748431e0ce6",
+  "templates_created": 4,
+  "agents_created": 4,
+  "test_conversations": 3,
+  "components": {
+    "database": "\u2705 Configurado",
+    "templates": "\u2705 Criados",
+    "agents": "\u2705 Criados",
+    "tests": "\u2705 Executados"
+  }
+}
