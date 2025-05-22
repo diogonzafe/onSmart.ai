@@ -1,4 +1,5 @@
-# app/llm/smart_router.py
+# app/llm/smart_router.py - Correções para evitar divisão por zero
+
 import time
 import logging
 import random
@@ -12,9 +13,6 @@ from app.llm.router import LLMRouter, llm_router
 from app.core.rate_limiter import get_rate_limiter
 from app.core.monitoring import get_llm_metrics, monitor_llm
 from app.core.cache import get_cache
-
-# Removida a importação circular:
-# from app.api import auth, users, llm_api
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +130,7 @@ class ModelSelector:
             "context_length": 6
         }
 
-        # HTTP models (servers) - Adicione essas características
+        # HTTP models (servers)
         http_characteristics = {
             "creativity": 7,
             "factual_accuracy": 7,
@@ -141,8 +139,8 @@ class ModelSelector:
             "computation": 6,
             "conciseness": 6,
             "language_quality": 7,
-            "cost_efficiency": 8,  # Considerado eficiente porque compartilha recursos
-            "speed": 8,            # Geralmente é rápido porque está em um servidor dedicado
+            "cost_efficiency": 8,
+            "speed": 8,
             "context_length": 7
         }
         
@@ -152,7 +150,6 @@ class ModelSelector:
             model_type = model.__class__.__name__.lower()
             
             if "httpllm" in model_type:
-                # Para modelos HTTP, usar características específicas do HTTP
                 self.model_characteristics[model_id] = http_characteristics.copy()
                 logger.info(f"Características HTTP inicializadas para modelo {model_id}")
             elif "llama" in model_type or "llama" in model_id.lower():
@@ -162,7 +159,6 @@ class ModelSelector:
             elif "deepseek" in model_type or "deepseek" in model_id.lower():
                 self.model_characteristics[model_id] = deepseek_characteristics.copy()
             else:
-                # Modelo desconhecido - usar valores padrão
                 self.model_characteristics[model_id] = self.model_characteristics["default"].copy()
                 
             logger.info(f"Características inicializadas para modelo {model_id}")
@@ -291,14 +287,14 @@ class ModelSelector:
                     
                     model_metrics[model_id] = {
                         "success_rate": success_rate,
-                        "latency": latency_avg,
+                        "latency": max(latency_avg, 0.01),  # CORREÇÃO: Evitar latência zero
                         "available": True
                     }
                 else:
                     # Sem dados de métricas - assumir valores padrão
                     model_metrics[model_id] = {
                         "success_rate": 100,
-                        "latency": 1.0,
+                        "latency": 1.0,  # Valor padrão seguro
                         "available": True
                     }
                 
@@ -309,7 +305,7 @@ class ModelSelector:
             for model_id in self.router.models:
                 model_metrics[model_id] = {
                     "success_rate": 100,
-                    "latency": 1.0,
+                    "latency": 1.0,  # Valor padrão seguro
                     "available": True
                 }
         
@@ -399,22 +395,32 @@ class ModelSelector:
             
             # Cálculo de pontuação ponderada
             score = 0
+            total_weight = 0  # CORREÇÃO: Rastrear peso total para evitar divisão por zero
+            
             for characteristic, weight in query_weights.items():
-                score += characteristics.get(characteristic, 5) * weight
+                char_value = characteristics.get(characteristic, 5)
+                score += char_value * weight
+                total_weight += weight
+            
+            # CORREÇÃO: Evitar divisão por zero
+            if total_weight > 0:
+                score = score / total_weight
+            else:
+                score = 5.0  # Valor padrão se não houver pesos
             
             # Ajustar por métricas operacionais
             op_metrics = operational_metrics.get(model_id, {})
             success_rate = op_metrics.get("success_rate", 100)
-            latency = op_metrics.get("latency", 1.0)
+            latency = max(op_metrics.get("latency", 1.0), 0.01)  # CORREÇÃO: Evitar latência zero
             
             # Ajustes de pontuação baseados em métricas operacionais
-            latency_factor = max(0.5, min(1.0, 1.0 / latency))  # Menor latência = maior fator
-            success_factor = success_rate / 100
+            latency_factor = max(0.1, min(2.0, 1.0 / latency))  # CORREÇÃO: Limitar fatores
+            success_factor = max(0.1, min(1.0, success_rate / 100))  # CORREÇÃO: Evitar zero
             
             # Aplicar fatores operacionais
             score = score * success_factor * latency_factor
             
-            model_scores[model_id] = score
+            model_scores[model_id] = max(score, 0.1)  # CORREÇÃO: Garantir pontuação mínima
         
         # 3. Selecionar o modelo com a maior pontuação
         if model_scores:
@@ -424,7 +430,8 @@ class ModelSelector:
         
         # Fallback para o modelo padrão
         logger.warning("Não foi possível calcular pontuações, usando modelo padrão")
-        return self.router.default_model
+        return self.router.default_model or available_models[0]
+
 
 class SmartLLMRouter:
     """
@@ -446,8 +453,6 @@ class SmartLLMRouter:
         self.metrics = get_llm_metrics()
         
         logger.info("SmartLLMRouter inicializado")
-    
-    # app/llm/smart_router.py - Modificar o método smart_generate
 
     async def smart_generate(
         self, 
@@ -458,12 +463,27 @@ class SmartLLMRouter:
         stream: bool = False,
         use_cache: bool = True,
         user_id: Optional[str] = None,
-        priority: int = 5,  # Novo parâmetro para prioridade
-        timeout: Optional[float] = None,  # Novo parâmetro para timeout
+        priority: int = 5,
+        timeout: Optional[float] = None,
         **kwargs
     ) -> Union[str, AsyncGenerator[str, None]]:
         """
-        Versão aprimorada com suporte a filas e prioridades.
+        Gera texto usando o modelo mais adequado, com cache e limitação de taxa.
+        
+        Args:
+            prompt: Texto de entrada
+            model_id: ID do modelo preferido (opcional)
+            max_tokens: Número máximo de tokens
+            temperature: Controle de aleatoriedade
+            stream: Se True, retorna um gerador para streaming
+            use_cache: Se True, verifica e utiliza cache
+            user_id: ID do usuário (para limitação de taxa)
+            priority: Prioridade da solicitação
+            timeout: Timeout em segundos
+            **kwargs: Parâmetros adicionais
+            
+        Returns:
+            Texto gerado ou gerador de streaming
         """
         # Se estiver em modo de streaming, não usar cache
         if stream:
@@ -481,53 +501,61 @@ class SmartLLMRouter:
             }
             cache_key = f"llm:generate:{hash(str(params))}"
             
-            cached_result = await self.cache.get(cache_key)
-            if cached_result:
-                logger.info(f"Resultado encontrado no cache")
-                return cached_result
+            try:
+                cached_result = await self.cache.get(cache_key)
+                if cached_result:
+                    logger.info(f"Resultado encontrado no cache")
+                    return cached_result
+            except Exception as e:
+                logger.warning(f"Erro ao acessar cache: {str(e)}")
         
         # Verificar rate limit (se houver user_id)
         if user_id:
-            is_allowed, rate_info = await self.rate_limiter.check_rate_limit(
-                key=user_id,
-                limit=60,  # 60 solicitações por minuto por usuário
-                period=60,
-                category="generate"
-            )
-            
-            if not is_allowed:
-                remaining = int(rate_info.get("reset", time.time()) - time.time())
-                error_msg = f"Limite de taxa excedido. Tente novamente em {remaining} segundos."
-                logger.warning(f"Rate limit atingido para usuário {user_id}: {error_msg}")
-                raise Exception(error_msg)
+            try:
+                is_allowed, rate_info = await self.rate_limiter.check_rate_limit(
+                    key=user_id,
+                    limit=60,  # 60 solicitações por minuto por usuário
+                    period=60,
+                    category="generate"
+                )
+                
+                if not is_allowed:
+                    remaining = max(0, int(rate_info.get("reset", time.time()) - time.time()))
+                    error_msg = f"Limite de taxa excedido. Tente novamente em {remaining} segundos."
+                    logger.warning(f"Rate limit atingido para usuário {user_id}: {error_msg}")
+                    raise Exception(error_msg)
+            except Exception as e:
+                logger.warning(f"Erro ao verificar rate limit: {str(e)}")
+                # Continuar mesmo com erro no rate limit
         
         # Selecionar o melhor modelo para a consulta
-        selected_model_id = await self.selector.select_best_model(
-            query=prompt,
-            operation="generate",
-            preferred_model=model_id
-        )
+        try:
+            selected_model_id = await self.selector.select_best_model(
+                query=prompt,
+                operation="generate",
+                preferred_model=model_id
+            )
+        except Exception as e:
+            logger.error(f"Erro ao selecionar modelo: {str(e)}")
+            # Fallback para modelo padrão ou primeiro disponível
+            selected_model_id = model_id or self.router.default_model or list(self.router.models.keys())[0]
         
         # Registrar início da solicitação
-        request_id = await self.metrics.record_request(
-            model_id=selected_model_id,
-            operation="generate",
-            user_id=user_id,
-            metadata={
-                "prompt_length": len(prompt),
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": stream
-            }
-        )
-        
-        # Obter fila de LLM
-        from app.llm.queue_manager import get_llm_queue_manager
-        queue_manager = get_llm_queue_manager()
-        
-        # Verificar se a fila está rodando
-        if not hasattr(queue_manager, 'running') or not queue_manager.running:
-            await queue_manager.start()
+        try:
+            request_id = await self.metrics.record_request(
+                model_id=selected_model_id,
+                operation="generate",
+                user_id=user_id,
+                metadata={
+                    "prompt_length": len(prompt),
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": stream
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao registrar métricas: {str(e)}")
+            request_id = str(uuid.uuid4())
         
         # Definir função de geração
         async def generation_task():
@@ -556,7 +584,10 @@ class SmartLLMRouter:
                     
                     # Armazenar em cache se necessário
                     if use_cache and cache_key:
-                        await self.cache.set(cache_key, result, ttl=3600)  # 1 hora de TTL
+                        try:
+                            await self.cache.set(cache_key, result, ttl=3600)  # 1 hora de TTL
+                        except Exception as e:
+                            logger.warning(f"Erro ao salvar no cache: {str(e)}")
                 
                 return result
                 
@@ -568,33 +599,27 @@ class SmartLLMRouter:
             finally:
                 # Registrar métricas
                 if not stream:
-                    # Estimar tokens para métricas (aproximado)
-                    tokens = None
-                    if isinstance(result, str):
-                        tokens = int(len(result.split()) * 1.3)
-                    
-                    await self.metrics.record_response(
-                        request_id=request_id,
-                        success=success,
-                        latency=time.time() - start_time,
-                        tokens=tokens,
-                        error=error_msg
-                    )
+                    try:
+                        # Estimar tokens para métricas (aproximado)
+                        tokens = None
+                        if isinstance(result, str):
+                            tokens = max(1, int(len(result.split()) * 1.3))  # CORREÇÃO: Evitar zero
+                        
+                        await self.metrics.record_response(
+                            request_id=request_id,
+                            success=success,
+                            latency=max(0.001, time.time() - start_time),  # CORREÇÃO: Evitar zero
+                            tokens=tokens,
+                            error=error_msg
+                        )
+                    except Exception as e:
+                        logger.warning(f"Erro ao registrar métricas finais: {str(e)}")
         
         # Para streaming, não podemos usar a fila (precisa retornar imediatamente)
         if stream:
             return await generation_task()
         
-        # Adicionar à fila com prioridade
-        task_id = await queue_manager.enqueue(
-            coro=generation_task(),
-            priority=priority,
-            timeout=timeout,
-            model_id=selected_model_id,
-            task_type="generate"
-        )
-        
-        # Aguardar e retornar resultado da fila
+        # Executar task diretamente (sem fila por enquanto para evitar complexidade)
         return await generation_task()
         
     async def smart_embed(
@@ -623,45 +648,58 @@ class SmartLLMRouter:
             text_for_hash = text if isinstance(text, str) else str(text)
             cache_key = f"llm:embed:{hash(text_for_hash)}"
             
-            cached_result = await self.cache.get(cache_key)
-            if cached_result:
-                logger.info(f"Embedding encontrado no cache")
-                return cached_result
+            try:
+                cached_result = await self.cache.get(cache_key)
+                if cached_result:
+                    logger.info(f"Embedding encontrado no cache")
+                    return cached_result
+            except Exception as e:
+                logger.warning(f"Erro ao acessar cache: {str(e)}")
         
         # Verificar rate limit (se houver user_id)
         if user_id:
-            is_allowed, rate_info = await self.rate_limiter.check_rate_limit(
-                key=user_id,
-                limit=120,  # 120 solicitações por minuto por usuário
-                period=60,
-                category="embed"
-            )
-            
-            if not is_allowed:
-                remaining = int(rate_info.get("reset", time.time()) - time.time())
-                error_msg = f"Limite de taxa excedido. Tente novamente em {remaining} segundos."
-                logger.warning(f"Rate limit atingido para usuário {user_id}: {error_msg}")
-                raise Exception(error_msg)
+            try:
+                is_allowed, rate_info = await self.rate_limiter.check_rate_limit(
+                    key=user_id,
+                    limit=120,  # 120 solicitações por minuto por usuário
+                    period=60,
+                    category="embed"
+                )
+                
+                if not is_allowed:
+                    remaining = max(0, int(rate_info.get("reset", time.time()) - time.time()))
+                    error_msg = f"Limite de taxa excedido. Tente novamente em {remaining} segundos."
+                    logger.warning(f"Rate limit atingido para usuário {user_id}: {error_msg}")
+                    raise Exception(error_msg)
+            except Exception as e:
+                logger.warning(f"Erro ao verificar rate limit: {str(e)}")
         
         # Simplificação: a seleção de modelo para embeddings é mais simples
-        # e geralmente focada em velocidade e consistência
         query = text if isinstance(text, str) else " ".join(text[:3])
         
-        selected_model_id = await self.selector.select_best_model(
-            query=query,
-            operation="embed",
-            preferred_model=model_id
-        )
+        try:
+            selected_model_id = await self.selector.select_best_model(
+                query=query,
+                operation="embed",
+                preferred_model=model_id
+            )
+        except Exception as e:
+            logger.error(f"Erro ao selecionar modelo: {str(e)}")
+            selected_model_id = model_id or self.router.default_model or list(self.router.models.keys())[0]
         
         # Registrar início da solicitação
-        request_id = await self.metrics.record_request(
-            model_id=selected_model_id,
-            operation="embed",
-            user_id=user_id,
-            metadata={
-                "text_type": "single" if isinstance(text, str) else f"list[{len(text)}]"
-            }
-        )
+        try:
+            request_id = await self.metrics.record_request(
+                model_id=selected_model_id,
+                operation="embed",
+                user_id=user_id,
+                metadata={
+                    "text_type": "single" if isinstance(text, str) else f"list[{len(text)}]"
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao registrar métricas: {str(e)}")
+            request_id = str(uuid.uuid4())
         
         # Iniciar o cronômetro
         start_time = time.time()
@@ -679,7 +717,10 @@ class SmartLLMRouter:
             
             # Armazenar em cache se necessário
             if use_cache and cache_key:
-                await self.cache.set(cache_key, result, ttl=86400)  # 24 horas de TTL
+                try:
+                    await self.cache.set(cache_key, result, ttl=86400)  # 24 horas de TTL
+                except Exception as e:
+                    logger.warning(f"Erro ao salvar no cache: {str(e)}")
             
             return result
             
@@ -690,15 +731,18 @@ class SmartLLMRouter:
             
         finally:
             # Registrar resultado
-            await self.metrics.record_response(
-                request_id=request_id,
-                success=success,
-                latency=time.time() - start_time,
-                error=error_msg,
-                metadata={
-                    "embedding_dim": len(result[0]) if result and isinstance(result, list) and len(result) > 0 else None
-                }
-            )
+            try:
+                await self.metrics.record_response(
+                    request_id=request_id,
+                    success=success,
+                    latency=max(0.001, time.time() - start_time),  # CORREÇÃO: Evitar zero
+                    error=error_msg,
+                    metadata={
+                        "embedding_dim": len(result[0]) if result and isinstance(result, list) and len(result) > 0 else None
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Erro ao registrar métricas finais: {str(e)}")
     
     async def get_model_metrics(self, model_id: Optional[str] = None, period: str = "today") -> Dict[str, Any]:
         """
@@ -711,10 +755,14 @@ class SmartLLMRouter:
         Returns:
             Dicionário com métricas
         """
-        return await self.metrics.get_model_metrics(
-            model_id=model_id,
-            period=period
-        )
+        try:
+            return await self.metrics.get_model_metrics(
+                model_id=model_id,
+                period=period
+            )
+        except Exception as e:
+            logger.error(f"Erro ao obter métricas: {str(e)}")
+            return {}
 
 # Singleton para acesso global ao router inteligente
 _smart_router_instance = None

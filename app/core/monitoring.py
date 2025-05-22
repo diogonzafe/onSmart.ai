@@ -1,4 +1,5 @@
-# app/core/monitoring.py
+# app/core/monitoring.py - Correções para evitar divisão por zero
+
 import time
 import logging
 import uuid
@@ -113,6 +114,9 @@ class LLMMetrics:
         if not self.redis:
             return
         
+        # CORREÇÃO: Garantir que latency não seja zero
+        latency = max(latency, 0.001)  # Mínimo de 1ms
+        
         try:
             # Obter dados da solicitação
             key = f"llm_metrics:request:{request_id}"
@@ -129,7 +133,7 @@ class LLMMetrics:
                 "status": "completed" if success else "failed",
                 "end_time": time.time(),
                 "latency": latency,
-                "tokens": tokens,
+                "tokens": max(tokens or 0, 0),  # CORREÇÃO: Garantir tokens não negativos
                 "error": error,
                 "response_metadata": metadata or {}
             })
@@ -159,7 +163,7 @@ class LLMMetrics:
                 )
                 
                 # Se houver tokens, atualizar contadores
-                if tokens:
+                if tokens and tokens > 0:
                     await pipe.hincrby(
                         f"llm_metrics:daily:{day_key}", 
                         f"{model_id}:{operation}:tokens", 
@@ -253,10 +257,10 @@ class LLMMetrics:
                             "successes": 0,
                             "failures": 0,
                             "tokens": 0,
-                            "latency_avg": 0,
-                            "latency_p95": 0,
-                            "latency_p99": 0,
-                            "success_rate": 0
+                            "latency_avg": 1.0,  # CORREÇÃO: Valor padrão seguro
+                            "latency_p95": 1.0,
+                            "latency_p99": 1.0,
+                            "success_rate": 100.0
                         }
                     
                     # Atualizar contadores
@@ -271,26 +275,38 @@ class LLMMetrics:
                         latencies = await self.redis.lrange(latency_key, 0, -1)
                         
                         if latencies:
-                            # Converter para números
-                            latencies = [float(l) for l in latencies]
+                            # Converter para números e filtrar valores válidos
+                            valid_latencies = []
+                            for l in latencies:
+                                try:
+                                    lat_value = float(l)
+                                    if lat_value > 0:  # CORREÇÃO: Apenas latências positivas
+                                        valid_latencies.append(lat_value)
+                                except (ValueError, TypeError):
+                                    continue
                             
-                            # Calcular métricas
-                            all_metrics[model_key][op_key]["latency_avg"] = sum(latencies) / len(latencies)
-                            
-                            # Percentis
-                            sorted_latencies = sorted(latencies)
-                            p95_idx = int(len(sorted_latencies) * 0.95)
-                            p99_idx = int(len(sorted_latencies) * 0.99)
-                            
-                            all_metrics[model_key][op_key]["latency_p95"] = sorted_latencies[p95_idx] if len(sorted_latencies) > p95_idx else 0
-                            all_metrics[model_key][op_key]["latency_p99"] = sorted_latencies[p99_idx] if len(sorted_latencies) > p99_idx else 0
-                            
-                            # Taxa de sucesso
-                            requests = all_metrics[model_key][op_key]["requests"]
-                            successes = all_metrics[model_key][op_key]["successes"]
-                            
-                            if requests > 0:
-                                all_metrics[model_key][op_key]["success_rate"] = (successes / requests) * 100
+                            if valid_latencies:
+                                # Calcular métricas
+                                all_metrics[model_key][op_key]["latency_avg"] = sum(valid_latencies) / len(valid_latencies)
+                                
+                                # Percentis
+                                sorted_latencies = sorted(valid_latencies)
+                                if len(sorted_latencies) > 0:
+                                    p95_idx = max(0, int(len(sorted_latencies) * 0.95) - 1)
+                                    p99_idx = max(0, int(len(sorted_latencies) * 0.99) - 1)
+                                    
+                                    all_metrics[model_key][op_key]["latency_p95"] = sorted_latencies[p95_idx]
+                                    all_metrics[model_key][op_key]["latency_p99"] = sorted_latencies[p99_idx]
+                        
+                        # Taxa de sucesso
+                        requests = all_metrics[model_key][op_key]["requests"]
+                        successes = all_metrics[model_key][op_key]["successes"]
+                        
+                        # CORREÇÃO: Evitar divisão por zero
+                        if requests > 0:
+                            all_metrics[model_key][op_key]["success_rate"] = (successes / requests) * 100
+                        else:
+                            all_metrics[model_key][op_key]["success_rate"] = 100.0
             
             return all_metrics
             
@@ -372,7 +388,7 @@ def monitor_llm(func=None, *, operation: str = None):
                 # Estimar o número de tokens (isso é aproximado e pode precisar ser ajustado)
                 if op == 'generate' and isinstance(result, str):
                     # Aproximação simples: ~1.3 tokens por palavra
-                    tokens = int(len(result.split()) * 1.3)
+                    tokens = max(1, int(len(result.split()) * 1.3))  # CORREÇÃO: Mínimo 1 token
                 
                 return result
                 
@@ -381,11 +397,14 @@ def monitor_llm(func=None, *, operation: str = None):
                 raise
                 
             finally:
+                # CORREÇÃO: Garantir latência mínima
+                latency = max(0.001, time.time() - start_time)
+                
                 # Registrar resultado, independente de sucesso ou falha
                 await metrics.record_response(
                     request_id=request_id,
                     success=success,
-                    latency=time.time() - start_time,
+                    latency=latency,
                     tokens=tokens,
                     error=error_msg,
                     metadata={

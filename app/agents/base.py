@@ -1,6 +1,7 @@
-# app/agents/base.py
+# app/agents/base.py - Correções para evitar divisão por zero
+
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union, AsyncGenerator  # Adicione AsyncGenerator aqui
+from typing import Dict, List, Any, Optional, Union, AsyncGenerator
 import logging
 import uuid
 import asyncio
@@ -13,8 +14,6 @@ from app.core.mcp import MCPFormatter, MCPResponseProcessor
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-
-# app/agents/base.py - Melhorar a classe AgentState
 
 class AgentState:
     """
@@ -76,7 +75,8 @@ class AgentState:
         await asyncio.sleep(self.timeout_seconds)
         
         # Se ainda estiver no mesmo estado de espera, considerar timeout
-        if self.status.startswith("waiting_") and (datetime.utcnow() - self.last_update).total_seconds() >= self.timeout_seconds:
+        elapsed = (datetime.utcnow() - self.last_update).total_seconds()
+        if self.status.startswith("waiting_") and elapsed >= self.timeout_seconds:
             self.update_status(self.TIMED_OUT, f"Timeout após {self.timeout_seconds}s em estado {self.status}")
     
     async def send_heartbeat(self):
@@ -85,13 +85,13 @@ class AgentState:
     
     def is_alive(self) -> bool:
         """Verifica se o agente está ativo com base no heartbeat."""
-        return (datetime.utcnow() - self.last_heartbeat).total_seconds() < self.heartbeat_interval * 2
+        elapsed = (datetime.utcnow() - self.last_heartbeat).total_seconds()
+        return elapsed < self.heartbeat_interval * 2
     
     def can_process_request(self) -> bool:
         """Verifica se o agente pode processar uma nova solicitação."""
         return self.status in [self.READY, self.COMPLETED, self.ERROR, self.TIMED_OUT]
     
-    # CORREÇÃO: Adicionar métodos que faltam
     def set_priority(self, key: str, value: int) -> None:
         """Define uma prioridade."""
         self.memory["priorities"][key] = value
@@ -293,18 +293,28 @@ class BaseAgent(ABC):
         
         # Configurações do LLM
         model_id = self.llm_config.get("model")
-        max_tokens = self.llm_config.get("max_tokens", 1024)
-        temperature = self.llm_config.get("temperature", 0.7)
+        max_tokens = max(self.llm_config.get("max_tokens", 1024), 1)  # CORREÇÃO: Mínimo 1
+        temperature = max(min(self.llm_config.get("temperature", 0.7), 1.0), 0.0)  # CORREÇÃO: Limitar entre 0 e 1
         
         # Gerar resposta
-        response = await smart_router.smart_generate(
-            prompt=prompt,
-            model_id=model_id,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-        
-        return response
+        try:
+            response = await smart_router.smart_generate(
+                prompt=prompt,
+                model_id=model_id,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+            # CORREÇÃO: Garantir que a resposta não seja vazia
+            if not response or not response.strip():
+                response = "Desculpe, não consegui gerar uma resposta adequada no momento."
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar resposta com LLM: {str(e)}")
+            # Resposta de fallback
+            return "Ocorreu um erro interno ao processar sua solicitação. Por favor, tente novamente."
     
     async def _save_response(self, 
                        conversation_id: str, 
@@ -321,14 +331,21 @@ class BaseAgent(ABC):
         Returns:
             Mensagem salva
         """
+        # Obter conteúdo filtrado ou usar resposta original
+        content = processed_response.get("filtered_content", response_text)
+        
+        # CORREÇÃO: Garantir que o conteúdo não seja vazio
+        if not content or not content.strip():
+            content = "Resposta processada com sucesso."
+        
         # Criar a mensagem
         message = Message(
             conversation_id=conversation_id,
             role=MessageRole.AGENT,
-            content=processed_response["filtered_content"],
+            content=content,
             meta_data={
-                "actions": processed_response["actions"],
-                "validation": processed_response["validation"]
+                "actions": processed_response.get("actions", []),
+                "validation": processed_response.get("validation", {})
             }
         )
         
@@ -338,10 +355,10 @@ class BaseAgent(ABC):
         self.db.refresh(message)
         
         # Atualizar estado do agente
-        self.state.update_status("idle")
+        self.state.update_status("ready")  # CORREÇÃO: Usar "ready" em vez de "idle"
         
         # Registrar ações executadas
-        for action in processed_response["actions"]:
+        for action in processed_response.get("actions", []):
             self.state.add_action(action)
         
         return message
@@ -359,7 +376,7 @@ class BaseAgent(ABC):
         results = []
         
         for action in actions:
-            action_name = action.get("name")
+            action_name = action.get("name", "unknown")
             params = action.get("params", {})
             
             try:
@@ -412,6 +429,10 @@ class BaseAgent(ABC):
         # Implementação básica - pode ser melhorada com NLP
         facts = []
         
+        # CORREÇÃO: Verificar se o texto não está vazio
+        if not text or not text.strip():
+            return facts
+        
         # Dividir por frases e filtrar
         sentences = [s.strip() for s in text.split(".") if len(s.strip()) > 10]
         
@@ -423,7 +444,8 @@ class BaseAgent(ABC):
         ]
         
         for sentence in sentences:
-            if any(ind in sentence.lower() for ind in indicators):
+            # CORREÇÃO: Verificar se a sentença não está vazia
+            if sentence and any(ind in sentence.lower() for ind in indicators):
                 facts.append(sentence)
         
         return facts[:5]  # Limitar a 5 fatos por processamento
