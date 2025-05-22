@@ -1,4 +1,4 @@
-# app/tests/newtest/test_agent_state.py - Versão corrigida
+# app/tests/newtest/test_agent_state.py - Versão corrigida final
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -117,7 +117,7 @@ class TestConversationService:
         assert result["message_processed"] == True
         assert "response" in result
 
-# CORREÇÃO: Função standalone em vez de método de classe
+# CORREÇÃO: Versão simplificada que funciona
 @pytest.mark.asyncio 
 async def test_detect_stuck_conversations():
     """Testa a detecção de conversas paralisadas."""
@@ -138,53 +138,41 @@ async def test_detect_stuck_conversations():
     message2 = MagicMock(spec=Message)
     message2.role = MessageRole.AGENT  # Última mensagem do agente (não stuck)
     
-    # Configurar mocks de forma mais específica
-    # Primeiro mock: busca de conversas
-    conversations_query = MagicMock()
-    conversations_query.filter.return_value.all.return_value = [conversation1, conversation2]
-    
-    # Segundo mock: busca de mensagens - precisa distinguir por conversa
-    def create_message_query():
-        query = MagicMock()
+    # SOLUÇÃO SIMPLIFICADA: Usar patch diretamente para cada query
+    with patch.object(conversation_service.db, 'query') as mock_query:
+        # Configurar retorno para query de conversas
+        conversations_result = MagicMock()
+        conversations_result.filter.return_value.all.return_value = [conversation1, conversation2]
         
-        call_count = [0]  # Usar lista para manter referência mutável
+        # Configurar retornos para queries de mensagens
+        message1_result = MagicMock()
+        message1_result.filter.return_value.order_by.return_value.first.return_value = message1
         
-        def filter_side_effect(*args):
-            # Primeiro filtro é para conv-1, segundo é para conv-2
-            mock_filter = MagicMock()
-            
-            def order_by_side_effect(*args):
-                mock_order = MagicMock()
+        message2_result = MagicMock()
+        message2_result.filter.return_value.order_by.return_value.first.return_value = message2
+        
+        # Configurar side_effect para distinguir os tipos de query
+        def query_side_effect(model):
+            if model == Conversation:
+                return conversations_result
+            elif model == Message:
+                # Retornar diferentes resultados baseado em chamadas sequenciais
+                if not hasattr(query_side_effect, 'message_call_count'):
+                    query_side_effect.message_call_count = 0
                 
-                def first_side_effect():
-                    if call_count[0] == 0:
-                        call_count[0] += 1
-                        return message1  # conv-1 tem mensagem humana (stuck)
-                    else:
-                        return message2  # conv-2 tem mensagem do agente (não stuck)
-                
-                mock_order.first = first_side_effect
-                return mock_order
+                if query_side_effect.message_call_count == 0:
+                    query_side_effect.message_call_count += 1
+                    return message1_result  # Primeira conversa -> stuck
+                else:
+                    return message2_result  # Segunda conversa -> não stuck
             
-            mock_filter.order_by = order_by_side_effect
-            return mock_filter
+            return MagicMock()
         
-        query.filter = filter_side_effect
-        return query
-    
-    # Configurar side_effect para query baseado no modelo
-    def side_effect_query(model):
-        if model == Conversation:
-            return conversations_query
-        elif model == Message:
-            return create_message_query()
-        return MagicMock()
-    
-    conversation_service.db.query.side_effect = side_effect_query
-    
-    # Chamar o método
-    result = conversation_service.detect_stuck_conversations(timeout_minutes=30)
-    
-    # Verificar resultado
-    assert len(result) == 1
-    assert "conv-1" in result
+        mock_query.side_effect = query_side_effect
+        
+        # Chamar o método
+        result = conversation_service.detect_stuck_conversations(timeout_minutes=30)
+        
+        # Verificar resultado - apenas conv-1 deve estar stuck
+        assert len(result) == 1
+        assert "conv-1" in result
