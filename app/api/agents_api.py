@@ -1,4 +1,4 @@
-# app/api/agents_api.py - Correções para o problema de conversation_id null
+# app/api/agents_api.py - Reorganizado: Foco na gestão de agentes
 
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from sqlalchemy.orm import Session
@@ -8,271 +8,498 @@ from datetime import datetime
 
 from app.db.database import get_db
 from app.models.agent import Agent, AgentType
-from app.models.conversation import Conversation, ConversationStatus
-from app.models.message import Message, MessageRole
-from app.schemas.agent import AgentResponse
-from app.schemas.message import SendMessage
+from app.models.template import Template
+from app.schemas.agent import (
+    AgentCreate, AgentUpdate, AgentResponse, 
+    AgentWithTools, AgentConfiguration
+)
 from app.services.agent_service import get_agent_service
 from app.core.security import get_current_active_user
 from app.models.user import User
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
-# CORREÇÃO: Endpoint melhorado para envio de mensagens
-@router.post("/{agent_id}/message")
-async def send_message_to_agent(
-    agent_id: str,
-    message_data: SendMessage,
-    conversation_id: Optional[str] = None,  # Tornar opcional
+# =============================================================================
+# 🤖 CRIAÇÃO E GESTÃO DE AGENTES
+# =============================================================================
+
+@router.post("/", response_model=AgentResponse)
+async def create_agent(
+    agent_data: AgentCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Envia uma mensagem para um agente específico.
-    Cria uma nova conversa automaticamente se não for fornecida.
+    🤖 Cria um novo agente baseado em template
+    
+    Fluxo:
+    1. Valida o template selecionado
+    2. Cria o agente com configurações específicas
+    3. Retorna o agente criado
     """
     try:
-        # Verificar se o agente existe e pertence ao usuário
-        agent = db.query(Agent).filter(
-            Agent.id == agent_id,
-            Agent.user_id == current_user.id,
-            Agent.is_active == True
-        ).first()
-        
-        if not agent:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agente não encontrado ou inativo"
-            )
-        
-        # Se conversation_id não foi fornecido ou é inválido, criar nova conversa
-        if not conversation_id or conversation_id == "null":
-            conversation = Conversation(
-                id=str(uuid.uuid4()),
-                title=f"Conversa com {agent.name}",
-                user_id=current_user.id,
-                agent_id=agent_id,
-                status=ConversationStatus.ACTIVE,
-                meta_data={
-                    "auto_created": True,
-                    "created_at": datetime.utcnow().isoformat()
-                }
-            )
-            
-            db.add(conversation)
-            db.commit()
-            db.refresh(conversation)
-            
-            conversation_id = conversation.id
-        else:
-            # Verificar se a conversa existe e pertence ao usuário
-            conversation = db.query(Conversation).filter(
-                Conversation.id == conversation_id,
-                Conversation.user_id == current_user.id
-            ).first()
-            
-            if not conversation:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conversa não encontrada"
-                )
-        
-        # Processar a mensagem
         agent_service = get_agent_service(db)
         
-        response = await agent_service.process_message(
-            agent_id=agent_id,
-            conversation_id=conversation_id,
-            message=message_data.content,
-            metadata=message_data.metadata
+        # Validar tipo de agente
+        if not AgentType.is_valid(agent_data.agent_type):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tipo de agente inválido. Valores válidos: {', '.join(AgentType.get_all_values())}"
+            )
+        
+        # Converter string para enum se necessário
+        if isinstance(agent_data.agent_type, str):
+            agent_type_enum = AgentType(agent_data.agent_type)
+        else:
+            agent_type_enum = agent_data.agent_type
+        
+        # Criar agente
+        agent = agent_service.create_agent(
+            user_id=current_user.id,
+            name=agent_data.name,
+            description=agent_data.description,
+            agent_type=agent_type_enum,
+            template_id=agent_data.template_id,
+            configuration=agent_data.configuration
         )
         
-        return {
-            "success": True,
-            "conversation_id": conversation_id,
-            "agent_id": agent_id,
-            "user_message": response["user_message"],
-            "agent_response": response["agent_response"],
-            "timestamp": datetime.utcnow().isoformat(),
-            "auto_created_conversation": conversation_id != message_data.metadata.get('original_conversation_id') if message_data.metadata else True
-        }
+        return AgentResponse(
+            id=agent.id,
+            name=agent.name,
+            description=agent.description,
+            user_id=agent.user_id,
+            agent_type=agent.type,
+            template_id=agent.template_id,
+            configuration=agent.configuration,
+            is_active=agent.is_active,
+            created_at=agent.created_at,
+            updated_at=agent.updated_at
+        )
         
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao processar mensagem: {str(e)}"
+            detail=f"Erro ao criar agente: {str(e)}"
         )
 
-# NOVO: Endpoint para criação explícita de conversas
-@router.post("/{agent_id}/conversations")
-async def create_conversation_with_agent(
-    agent_id: str,
-    title: Optional[str] = Body(None),
-    initial_message: Optional[str] = Body(None),
+@router.get("/", response_model=List[AgentResponse])
+async def list_agents(
+    agent_type: Optional[AgentType] = Query(None),
+    is_active: bool = Query(True),
+    include_templates: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Cria uma nova conversa com um agente específico.
-    Opcionalmente envia uma mensagem inicial.
+    📋 Lista agentes do usuário com filtros
     """
     try:
-        # Verificar se o agente existe e pertence ao usuário
-        agent = db.query(Agent).filter(
-            Agent.id == agent_id,
-            Agent.user_id == current_user.id,
-            Agent.is_active == True
-        ).first()
+        agent_service = get_agent_service(db)
         
-        if not agent:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agente não encontrado ou inativo"
-            )
-        
-        # Criar a conversa
-        conversation_title = title or f"Conversa com {agent.name} - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        
-        conversation = Conversation(
-            id=str(uuid.uuid4()),
-            title=conversation_title,
+        agents = await agent_service.list_agents(
             user_id=current_user.id,
-            agent_id=agent_id,
-            status=ConversationStatus.ACTIVE,
-            meta_data={
-                "explicit_creation": True,
-                "agent_type": agent.type.value
-            }
+            agent_type=agent_type,
+            is_active=is_active
         )
         
-        db.add(conversation)
-        db.commit()
-        db.refresh(conversation)
-        
-        # Se há mensagem inicial, processá-la
-        response_data = {
-            "conversation_id": conversation.id,
-            "conversation_title": conversation.title,
-            "agent": {
-                "id": agent.id,
-                "name": agent.name,
-                "type": agent.type.value
-            },
-            "created_at": conversation.created_at.isoformat()
-        }
-        
-        if initial_message:
-            agent_service = get_agent_service(db)
-            
-            message_response = await agent_service.process_message(
-                agent_id=agent_id,
-                conversation_id=conversation.id,
-                message=initial_message
+        result = []
+        for agent in agents:
+            agent_data = AgentResponse(
+                id=agent.id,
+                name=agent.name,
+                description=agent.description,
+                user_id=agent.user_id,
+                agent_type=agent.type,
+                template_id=agent.template_id,
+                configuration=agent.configuration,
+                is_active=agent.is_active,
+                created_at=agent.created_at,
+                updated_at=agent.updated_at
             )
             
-            response_data["initial_exchange"] = {
-                "user_message": message_response["user_message"],
-                "agent_response": message_response["agent_response"]
+            # Incluir informações do template se solicitado
+            if include_templates and agent.template:
+                agent_data.template_info = {
+                    "name": agent.template.name,
+                    "department": agent.template.department.value
+                }
+            
+            result.append(agent_data)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao listar agentes: {str(e)}"
+        )
+
+@router.get("/{agent_id}", response_model=AgentResponse)
+async def get_agent(
+    agent_id: str,
+    include_statistics: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    🔍 Obtém detalhes de um agente específico
+    """
+    try:
+        agent_service = get_agent_service(db)
+        agent = agent_service.get_agent(agent_id)
+        
+        # Verificar propriedade
+        if agent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado a este agente"
+            )
+        
+        response_data = AgentResponse(
+            id=agent.id,
+            name=agent.name,
+            description=agent.description,
+            user_id=agent.user_id,
+            agent_type=agent.type,
+            template_id=agent.template_id,
+            configuration=agent.configuration,
+            is_active=agent.is_active,
+            created_at=agent.created_at,
+            updated_at=agent.updated_at
+        )
+        
+        # Incluir estatísticas se solicitado
+        if include_statistics:
+            from app.models.conversation import Conversation
+            from app.models.message import Message
+            
+            # Contar conversas
+            conversation_count = db.query(Conversation).filter(
+                Conversation.agent_id == agent_id
+            ).count()
+            
+            # Contar mensagens processadas
+            message_count = db.query(Message).join(Conversation).filter(
+                Conversation.agent_id == agent_id,
+                Message.role != MessageRole.HUMAN
+            ).count()
+            
+            response_data.statistics = {
+                "conversations": conversation_count,
+                "messages_processed": message_count,
+                "last_activity": agent.updated_at.isoformat()
             }
         
         return response_data
         
-    except HTTPException:
-        raise
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agente não encontrado"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao criar conversa: {str(e)}"
+            detail=f"Erro ao obter agente: {str(e)}"
         )
 
-# NOVO: Endpoint para listar conversas de um agente
-@router.get("/{agent_id}/conversations")
-async def list_agent_conversations(
+@router.put("/{agent_id}", response_model=AgentResponse)
+async def update_agent(
     agent_id: str,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    status: Optional[ConversationStatus] = None,
+    agent_data: AgentUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Lista as conversas de um agente específico.
+    ✏️ Atualiza um agente existente
     """
     try:
-        # Verificar se o agente existe e pertence ao usuário
-        agent = db.query(Agent).filter(
-            Agent.id == agent_id,
-            Agent.user_id == current_user.id
-        ).first()
+        agent_service = get_agent_service(db)
         
-        if not agent:
+        # Verificar se o agente existe e pertence ao usuário
+        existing_agent = agent_service.get_agent(agent_id)
+        if existing_agent.user_id != current_user.id:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Agente não encontrado"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado a este agente"
             )
         
-        # Construir query
-        query = db.query(Conversation).filter(
-            Conversation.agent_id == agent_id,
-            Conversation.user_id == current_user.id
+        # Atualizar agente
+        updated_agent = agent_service.update_agent(
+            agent_id=agent_id,
+            name=agent_data.name,
+            description=agent_data.description,
+            is_active=agent_data.is_active,
+            configuration=agent_data.configuration
         )
         
-        if status:
-            query = query.filter(Conversation.status == status)
+        return AgentResponse(
+            id=updated_agent.id,
+            name=updated_agent.name,
+            description=updated_agent.description,
+            user_id=updated_agent.user_id,
+            agent_type=updated_agent.type,
+            template_id=updated_agent.template_id,
+            configuration=updated_agent.configuration,
+            is_active=updated_agent.is_active,
+            created_at=updated_agent.created_at,
+            updated_at=updated_agent.updated_at
+        )
         
-        # Obter total e aplicar paginação
-        total = query.count()
-        conversations = query.order_by(
-            Conversation.updated_at.desc()
-        ).offset(offset).limit(limit).all()
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agente não encontrado"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao atualizar agente: {str(e)}"
+        )
+
+@router.delete("/{agent_id}")
+async def delete_agent(
+    agent_id: str,
+    force: bool = Query(False, description="Forçar remoção mesmo com conversas ativas"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    🗑️ Remove um agente (soft delete)
+    """
+    try:
+        agent_service = get_agent_service(db)
         
-        # Preparar resposta
-        items = []
-        for conv in conversations:
-            # Contar mensagens
-            message_count = db.query(Message).filter(
-                Message.conversation_id == conv.id
+        # Verificar propriedade
+        agent = agent_service.get_agent(agent_id)
+        if agent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado a este agente"
+            )
+        
+        # Verificar se há conversas ativas
+        if not force:
+            from app.models.conversation import Conversation, ConversationStatus
+            active_conversations = db.query(Conversation).filter(
+                Conversation.agent_id == agent_id,
+                Conversation.status == ConversationStatus.ACTIVE
             ).count()
             
-            # Última mensagem
-            last_message = db.query(Message).filter(
-                Message.conversation_id == conv.id
-            ).order_by(Message.created_at.desc()).first()
-            
-            items.append({
-                "id": conv.id,
-                "title": conv.title,
-                "status": conv.status.value,
-                "message_count": message_count,
-                "last_message": {
-                    "content": last_message.content[:100] + "..." if last_message and len(last_message.content) > 100 else last_message.content if last_message else None,
-                    "role": last_message.role.value if last_message else None,
-                    "created_at": last_message.created_at.isoformat() if last_message else None
-                } if last_message else None,
-                "created_at": conv.created_at.isoformat(),
-                "updated_at": conv.updated_at.isoformat()
-            })
+            if active_conversations > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Agente possui {active_conversations} conversas ativas. Use force=true para forçar remoção."
+                )
         
-        return {
-            "agent": {
-                "id": agent.id,
-                "name": agent.name,
-                "type": agent.type.value
-            },
-            "conversations": {
-                "items": items,
-                "total": total,
-                "limit": limit,
-                "offset": offset
+        # Remover agente
+        success = agent_service.delete_agent(agent_id)
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Agente desativado com sucesso",
+                "agent_id": agent_id
             }
-        }
-        
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao desativar agente"
+            )
+            
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agente não encontrado"
+        )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao listar conversas: {str(e)}"
+            detail=f"Erro ao remover agente: {str(e)}"
+        )
+
+# =============================================================================
+# ⚙️ CONFIGURAÇÃO E VALIDAÇÃO
+# =============================================================================
+
+@router.post("/{agent_id}/validate-config")
+async def validate_agent_configuration(
+    agent_id: str,
+    configuration: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    ✅ Valida configuração de um agente
+    """
+    try:
+        agent_service = get_agent_service(db)
+        
+        # Verificar propriedade
+        agent = agent_service.get_agent(agent_id)
+        if agent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado a este agente"
+            )
+        
+        # Obter template para validação
+        template = db.query(Template).filter(Template.id == agent.template_id).first()
+        if not template:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Template do agente não encontrado"
+            )
+        
+        # Validar configuração usando o template manager
+        from app.templates.base import get_template_manager
+        template_manager = get_template_manager()
+        
+        # Carregar template se necessário
+        processed_template = template_manager.load_template(template)
+        
+        # Validar variáveis
+        template_manager._validate_variables(
+            processed_template["variables"], 
+            configuration
+        )
+        
+        return {
+            "valid": True,
+            "message": "Configuração válida",
+            "template_variables": processed_template["variables"]
+        }
+        
+    except ValueError as e:
+        return {
+            "valid": False,
+            "message": str(e),
+            "errors": [str(e)]
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao validar configuração: {str(e)}"
+        )
+
+@router.get("/{agent_id}/config-template")
+async def get_agent_config_template(
+    agent_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    📋 Obtém template de configuração para um agente
+    """
+    try:
+        agent_service = get_agent_service(db)
+        
+        # Verificar propriedade
+        agent = agent_service.get_agent(agent_id)
+        if agent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado a este agente"
+            )
+        
+        # Obter configurações específicas do departamento
+        dept_config = agent.get_department_config()
+        
+        return {
+            "agent_type": agent.type.value,
+            "required_fields": dept_config["required_fields"],
+            "optional_fields": dept_config["optional_fields"],
+            "current_configuration": agent.configuration,
+            "template_id": agent.template_id
+        }
+        
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agente não encontrado"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao obter template de configuração: {str(e)}"
+        )
+
+# =============================================================================
+# 📊 ESTATÍSTICAS E STATUS
+# =============================================================================
+
+@router.get("/{agent_id}/statistics")
+async def get_agent_statistics(
+    agent_id: str,
+    period: str = Query("week", regex="^(day|week|month|year)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    📊 Obtém estatísticas detalhadas de um agente
+    """
+    # Delegar para o metrics_api para evitar duplicação
+    from app.api.metrics_api import get_agent_metrics
+    
+    return await get_agent_metrics(
+        agent_id=agent_id,
+        period=period,
+        db=db,
+        current_user=current_user
+    )
+
+@router.get("/{agent_id}/status")
+async def get_agent_status(
+    agent_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    ⚡ Obtém status atual de um agente
+    """
+    try:
+        agent_service = get_agent_service(db)
+        
+        # Verificar propriedade
+        agent = agent_service.get_agent(agent_id)
+        if agent.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado a este agente"
+            )
+        
+        # Verificar conversas ativas
+        from app.models.conversation import Conversation, ConversationStatus
+        active_conversations = db.query(Conversation).filter(
+            Conversation.agent_id == agent_id,
+            Conversation.status == ConversationStatus.ACTIVE
+        ).count()
+        
+        return {
+            "agent_id": agent_id,
+            "name": agent.name,
+            "is_active": agent.is_active,
+            "type": agent.type.value,
+            "active_conversations": active_conversations,
+            "last_updated": agent.updated_at.isoformat(),
+            "status": "active" if agent.is_active else "inactive",
+            "configuration_complete": bool(agent.configuration)
+        }
+        
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agente não encontrado"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao obter status do agente: {str(e)}"
         )
